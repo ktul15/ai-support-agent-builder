@@ -40,6 +40,26 @@ Flutter app + Next.js admin
         External AI (embeddings · LLM · reranker)
 ```
 
+## Local development
+
+Requires Node 20 (`nvm use`) and Docker.
+
+```bash
+cp .env.example .env   # fill in required vars
+npm install
+npm run db:up          # Postgres (pgvector) + Redis via docker compose
+npm run dev:api        # http://localhost:3000/health
+```
+
+Backing services: `npm run db:up` / `db:down` / `db:reset` (wipe volumes) / `db:logs`.
+pgvector is enabled automatically on first DB init (`db/init/001-extensions.sql`).
+
+> Scripts in `db/init/` run **only on a fresh (empty) data volume**. If you edit or
+> add init SQL, run `npm run db:reset` to re-apply it (this destroys local data).
+> Postgres is published on host port **5433** by default (to avoid clashing with a
+> native Postgres on 5432). Need different ports? Set `POSTGRES_PORT` / `REDIS_PORT`
+> in `.env` — and update `DATABASE_URL` / `REDIS_URL` to match.
+
 ## Status
 
 🚧 In active development. See [`PROJECT_PLAN.md`](./PROJECT_PLAN.md) for the full design, data model, ingestion pipeline, guardrails, and the 4-week build plan.
