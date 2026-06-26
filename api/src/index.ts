@@ -1,9 +1,15 @@
+import { getConfig } from './config.js';
 import { createApp } from './app.js';
 
-// Minimal boot. Typed/validated config (zod) lands in issue #3.
-const port = Number(process.env.PORT ?? 3000);
-
-const app = createApp();
-app.listen(port, () => {
-  console.log(`asab-api listening on http://localhost:${port}`);
-});
+// Validate env first — on misconfig, print only the readable message (no stack)
+// and exit non-zero, so operators see the aggregated error, not framework noise.
+try {
+  const config = getConfig();
+  const app = createApp();
+  app.listen(config.PORT, () => {
+    console.log(`asab-api listening on http://localhost:${config.PORT}`);
+  });
+} catch (err) {
+  console.error(err instanceof Error ? err.message : String(err));
+  process.exit(1);
+}
