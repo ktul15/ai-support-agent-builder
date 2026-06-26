@@ -21,6 +21,11 @@ jobs:
     name: lint · format · build · test
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # Prisma's env("DATABASE_URL") must resolve for `prisma generate` (npm ci
+      # postinstall). No DB is contacted at install/build/test time — this is a
+      # parse-only placeholder.
+      DATABASE_URL: postgres://user:pass@localhost:5432/placeholder
     steps:
       - uses: actions/checkout@v4
 
