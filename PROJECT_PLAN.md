@@ -15,13 +15,14 @@ This is the single most-requested AI capability in the market right now. Shippin
 3. **AI discipline** — the model refuses to hallucinate. "I don't know" is a feature, not a bug.
 4. **Full-stack range** — Node ingestion pipeline + streaming API + Flutter mobile app + web admin.
 
-The portfolio money shot: *upload a 30-page PDF, ask a specific question, get a correct cited answer in ~2 seconds, then ask something off-topic and watch it cleanly refuse.*
+The portfolio money shot: _upload a 30-page PDF, ask a specific question, get a correct cited answer in ~2 seconds, then ask something off-topic and watch it cleanly refuse._
 
 ---
 
 ## 1. Scope
 
 ### MVP (must ship)
+
 - Web **builder/admin** dashboard: tenant signs up, uploads docs (PDF/MD/TXT/DOCX), watches ingestion status.
 - **Ingestion pipeline**: parse → chunk → embed → store in pgvector, with progress + error states.
 - **Mobile assistant** (Flutter): streaming chat that answers from the tenant's corpus with inline citations.
@@ -31,6 +32,7 @@ The portfolio money shot: *upload a 30-page PDF, ask a specific question, get a 
 - **Auth**: tenant owner login (admin) + scoped access for the assistant.
 
 ### Stretch (post-MVP, shows roadmap thinking)
+
 - Embeddable **web chat widget** (the upsell in the brief).
 - **Usage analytics**: top questions, unanswered questions, deflection rate.
 - **Hybrid search** (vector + keyword/BM25) and a **reranker**.
@@ -39,6 +41,7 @@ The portfolio money shot: *upload a 30-page PDF, ask a specific question, get a 
 - **Self-serve billing** (Stripe), usage tiers.
 
 ### Explicit non-goals (MVP)
+
 - No fine-tuning. RAG only.
 - No voice. Text chat only.
 - No human-handoff / live-agent escalation (note it as a roadmap item).
@@ -48,11 +51,11 @@ The portfolio money shot: *upload a 30-page PDF, ask a specific question, get a 
 
 ## 2. Users & core flows
 
-| Persona | Goal | Surface |
-|---|---|---|
-| **SMB owner** (the buyer) | Upload docs, get a working assistant, see it works | Web admin |
-| **Customer / end user** | Ask a question, get a trustworthy cited answer | Flutter app (or widget) |
-| **You / operator** | Monitor ingestion, evals, cost | Admin + dashboards |
+| Persona                   | Goal                                               | Surface                 |
+| ------------------------- | -------------------------------------------------- | ----------------------- |
+| **SMB owner** (the buyer) | Upload docs, get a working assistant, see it works | Web admin               |
+| **Customer / end user**   | Ask a question, get a trustworthy cited answer     | Flutter app (or widget) |
+| **You / operator**        | Monitor ingestion, evals, cost                     | Admin + dashboards      |
 
 **Builder flow:** sign up → create assistant → upload docs → watch ingest → test in playground → publish.
 **Consumer flow:** open app → ask question → streamed answer with citations → tap citation to verify → if off-corpus, get "not in the docs" refusal.
@@ -99,20 +102,20 @@ The portfolio money shot: *upload a 30-page PDF, ask a specific question, get a 
 
 Chosen to match your existing toolbelt (Express + Next.js + Prisma + Postgres + Redis; Flutter + BLoC from your apps) so it's realistic and fast to build.
 
-| Layer | Choice | Why |
-|---|---|---|
-| Mobile | **Flutter + BLoC + Dio** | Your strongest stack; SSE streaming via Dio/`http` |
-| Admin web | **Next.js (App Router)** | Already in your toolkit; great for upload UI + dashboards |
-| API | **Express (Node/TS)** | Ubiquitous, huge ecosystem; SSE streaming via raw `res.write`; pair with `zod` for request validation |
-| DB | **Postgres + pgvector** | Brief mandates pgvector; single DB for relational + vectors |
-| ORM | **Prisma** | You use it; `Unsupported("vector")` + raw SQL for ANN queries |
-| Queue/cache | **Redis + BullMQ** | Async ingestion jobs, rate limiting, response cache |
-| Object storage | **Cloudflare R2 / S3** | Raw file storage, per-tenant prefixes |
-| LLM | **Claude (Haiku 4.5 default, Sonnet 4.6 for quality)** | Strong grounding + cheap streaming; fits your ecosystem |
-| Embeddings | **OpenAI `text-embedding-3-small` (1536-d)** default; Voyage `voyage-3` as quality option | Cheap, solid retrieval; swappable behind an interface |
-| Reranker (stretch) | **Cohere `rerank-3.5`** | Big precision win on top-k |
-| Parsing | `pdf-parse`/`unpdf`, `mammoth` (DOCX), `marked` (MD) | Reliable text extraction per format |
-| Infra | Railway/Render/Fly for API+worker; Neon/Supabase for PG | Fast deploy, pgvector supported |
+| Layer              | Choice                                                                                    | Why                                                                                                   |
+| ------------------ | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Mobile             | **Flutter + BLoC + Dio**                                                                  | Your strongest stack; SSE streaming via Dio/`http`                                                    |
+| Admin web          | **Next.js (App Router)**                                                                  | Already in your toolkit; great for upload UI + dashboards                                             |
+| API                | **Express (Node/TS)**                                                                     | Ubiquitous, huge ecosystem; SSE streaming via raw `res.write`; pair with `zod` for request validation |
+| DB                 | **Postgres + pgvector**                                                                   | Brief mandates pgvector; single DB for relational + vectors                                           |
+| ORM                | **Prisma**                                                                                | You use it; `Unsupported("vector")` + raw SQL for ANN queries                                         |
+| Queue/cache        | **Redis + BullMQ**                                                                        | Async ingestion jobs, rate limiting, response cache                                                   |
+| Object storage     | **Cloudflare R2 / S3**                                                                    | Raw file storage, per-tenant prefixes                                                                 |
+| LLM                | **Claude (Haiku 4.5 default, Sonnet 4.6 for quality)**                                    | Strong grounding + cheap streaming; fits your ecosystem                                               |
+| Embeddings         | **OpenAI `text-embedding-3-small` (1536-d)** default; Voyage `voyage-3` as quality option | Cheap, solid retrieval; swappable behind an interface                                                 |
+| Reranker (stretch) | **Cohere `rerank-3.5`**                                                                   | Big precision win on top-k                                                                            |
+| Parsing            | `pdf-parse`/`unpdf`, `mammoth` (DOCX), `marked` (MD)                                      | Reliable text extraction per format                                                                   |
+| Infra              | Railway/Render/Fly for API+worker; Neon/Supabase for PG                                   | Fast deploy, pgvector supported                                                                       |
 
 **Abstraction rule:** wrap embeddings, LLM, and reranker behind narrow TS interfaces (`Embedder`, `Chat`, `Reranker`) so any provider is swappable — this itself is a portfolio signal.
 
@@ -155,16 +158,19 @@ api_key(id, tenant_id, assistant_id, key_hash, last_used_at)
 ```
 
 **Indexes:**
+
 - `chunk` HNSW index on `embedding` (`vector_cosine_ops`), `m=16, ef_construction=64`.
 - Composite `(tenant_id, assistant_id)` on `chunk` so ANN queries filter tenant **before** the vector scan.
 - `content_hash` unique per `(tenant_id, assistant_id)` to skip re-embedding identical chunks.
 
 **RLS sketch:**
+
 ```sql
 ALTER TABLE chunk ENABLE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON chunk
   USING (tenant_id = current_setting('app.tenant_id')::uuid);
 ```
+
 The API sets `SET LOCAL app.tenant_id = '<jwt.tenant>'` at the start of every request transaction. Even a query bug can't leak across tenants.
 
 ---
@@ -214,6 +220,7 @@ On each question:
    ...
    ```
 6. **System prompt** (grounding contract):
+
    > You are {assistant} for {tenant}. Answer ONLY from the numbered sources below.
    > Cite every claim with [n]. If the sources don't contain the answer, say exactly:
    > "I don't have that in the docs I was given." Never use outside knowledge. Never guess.
@@ -323,29 +330,33 @@ Playground returns **retrieval debug** (which chunks, scores, threshold decision
 ## 17. Build plan (4 weeks)
 
 **Week 1 — Foundation & ingestion**
+
 - Repo, env, Docker Postgres+pgvector+Redis, Prisma schema + RLS, R2 bucket.
 - Express skeleton, auth (signup/login/JWT), tenant middleware.
 - Upload endpoint + BullMQ worker; parse + chunk + embed PDF end-to-end.
-- *Milestone:* upload a PDF, see chunks with embeddings land in pgvector, status → ready.
+- _Milestone:_ upload a PDF, see chunks with embeddings land in pgvector, status → ready.
 
 **Week 2 — Retrieval, chat, guardrails**
+
 - ANN query (tenant-filtered), prompt assembly, Claude integration.
 - SSE streaming endpoint; citations payload.
 - Threshold gate + refusal contract; playground endpoint with retrieval debug.
-- *Milestone:* curl a question → streamed cited answer; off-corpus → clean refusal.
+- _Milestone:_ curl a question → streamed cited answer; off-corpus → clean refusal.
 
 **Week 3 — Surfaces**
+
 - Next.js admin: upload UI w/ live progress, document list, playground, publish.
 - Flutter app: ChatBloc + streaming bubbles + citation bottom-sheet + refusal card.
 - API-key auth for consumer chat.
-- *Milestone:* full demo loop works on device.
+- _Milestone:_ full demo loop works on device.
 
 **Week 4 — Polish, evals, demo**
+
 - Eval set + metrics; tune chunking + threshold.
 - (Stretch) hybrid + reranker, groundedness check, feedback thumbs.
 - Seed a real demo corpus; record the killer-demo video; write README + architecture doc.
 - Deploy API+worker+DB; ship.
-- *Milestone:* portfolio-ready, deployed, recorded.
+- _Milestone:_ portfolio-ready, deployed, recorded.
 
 ---
 
@@ -355,20 +366,20 @@ Playground returns **retrieval debug** (which chunks, scores, threshold decision
 2. Ask a **specific** question ("What's the warranty period for X?"). First token in <1s, answer streams with `[1]` citation.
 3. **Tap the citation** → bottom sheet shows the exact paragraph + page. Trust loop closed.
 4. Ask something **off-corpus** ("Do you ship to Mars?") → clean "I don't have that in the docs" refusal, visually distinct.
-5. (Closer) open the playground → show retrieval scores + the threshold decision behind the refusal. *That's the engineering credibility shot.*
+5. (Closer) open the playground → show retrieval scores + the threshold decision behind the refusal. _That's the engineering credibility shot._
 
 ---
 
 ## 19. Risks & mitigations
 
-| Risk | Mitigation |
-|---|---|
-| Bad PDF parsing (tables, scans) | Per-format parsers; flag low-text pages; OCR as roadmap |
-| Retrieval misses (poor chunking) | Context headers, overlap, hybrid+rerank, eval set to tune |
-| Hallucination slips through | 3-layer guardrails + groundedness check + eval on refusal recall |
-| Tenant data leak | DB-level RLS + tenant-filtered ANN + tests asserting cross-tenant queries return zero |
-| Streaming flakiness | Heartbeats, cancel, non-stream fallback |
-| Cost surprises | Token budgets, rate limits, per-tenant metering |
+| Risk                             | Mitigation                                                                            |
+| -------------------------------- | ------------------------------------------------------------------------------------- |
+| Bad PDF parsing (tables, scans)  | Per-format parsers; flag low-text pages; OCR as roadmap                               |
+| Retrieval misses (poor chunking) | Context headers, overlap, hybrid+rerank, eval set to tune                             |
+| Hallucination slips through      | 3-layer guardrails + groundedness check + eval on refusal recall                      |
+| Tenant data leak                 | DB-level RLS + tenant-filtered ANN + tests asserting cross-tenant queries return zero |
+| Streaming flakiness              | Heartbeats, cancel, non-stream fallback                                               |
+| Cost surprises                   | Token budgets, rate limits, per-tenant metering                                       |
 
 ---
 
@@ -383,4 +394,5 @@ Playground returns **retrieval debug** (which chunks, scores, threshold decision
 ---
 
 ### TL;DR
+
 Thin streaming Express API · async BullMQ ingestion into pgvector · tenant-filtered retrieval behind DB-level RLS · Claude generation with a hard grounding contract and a pre-LLM refusal gate · Flutter consumer app + Next.js builder. Demo proves correct cited answers in seconds and disciplined refusals on off-corpus questions. Swappable provider interfaces and an eval harness signal maturity beyond a prototype.

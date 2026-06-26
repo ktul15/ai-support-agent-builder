@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+# Least privilege: the gate only needs to read the repo.
+permissions:
+  contents: read
+
+# One run per ref. Cancel superseded runs on feature/PR branches, but never on
+# main/dev — those are gated post-merge and each push must complete its check.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/dev' }}
+
+jobs:
+  verify:
+    name: lint · format · build · test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc # pins Node 20 — same as local; closes the Node-16 trap
+          cache: npm
+
+      - name: Install (clean, from lockfile)
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Typecheck & build
+        run: npm run build # tsc -b — type-checks and emits via project references
+
+      - name: Test
+        run: npm test
+
+      # Advisory only — surfaces high/critical advisories without blocking the
+      # gate. The known dev-only esbuild/vitest chain is a separate chore.
+      - name: Audit (advisory)
+        run: npm audit --audit-level=high
+        continue-on-error: true

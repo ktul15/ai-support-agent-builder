@@ -15,6 +15,7 @@ A multi-tenant **RAG SaaS**: an SMB uploads docs → async ingestion (parse → 
 Planned monorepo: `/api` (Express + TS), `/admin` (Next.js), `/mobile` (Flutter), `/packages/shared`.
 
 Request flow that spans multiple components:
+
 - **Builder path:** `admin` upload → `api` stores raw file in object storage (R2/S3) + enqueues a **BullMQ** job → **ingestion worker** runs the pipeline (parse → structure-aware chunk → dedup → embed) → vectors land in **Postgres/pgvector**. Uploads never block; status flows back as stage events for the live progress UI.
 - **Consumer path:** `mobile` question → `api` embeds the query → tenant-filtered **ANN retrieval** → threshold gate → prompt assembly → **Claude** generation → **SSE-streamed** tokens, with a final event carrying `citations[]`.
 
@@ -51,21 +52,27 @@ Work is tracked on **GitHub Projects v2 board #9** (`gh project ... --owner ktul
 After completing **every** feature, this 3-step review flow is strictly required before merging. Do not skip any step.
 
 ### Step 1 — Developer Explanation
+
 Immediately after finishing a feature, provide a detailed explanation:
+
 - **What was done, why, and how** — describe the feature, its purpose, and the approach taken.
 - List **ALL** created/modified files with a one-line purpose for each.
 - Explain the **complete data flow** through the system (e.g., UI → Provider → Repository → API/DB and back).
 - **Wait for the user to review** before proceeding to Step 2.
 
 ### Step 2 — Code Review
+
 After the user has reviewed Step 1:
+
 - Run a **code reviewer agent** to audit all feature code.
 - List **ALL** issues found with their respective file names.
 - For each issue: explain **what it is**, **why it's a problem**, and give a **real-world example** of the consequence if left unfixed.
 - Present the full list to the user and **wait for their decision**.
 
 ### Step 3 — Fix Approved Issues
+
 After the user has reviewed Step 2:
+
 - The user decides which issues to fix — **fix only those**.
 - Do **NOT** fix issues the user has not approved.
 - If fixes are substantial (new files, significant logic changes), **repeat from Step 1** for the fixes.
@@ -80,6 +87,7 @@ After the user has reviewed Step 2:
 - **Flow:** `feature/*` → `dev` → `main`
 
 ### Steps for every issue
+
 1. **Move the issue to "In Progress"** on board #9 (`gh issue edit <number> ...` / update the project board Status to "In Progress").
 2. `git checkout dev && git pull`
 3. `git checkout -b feature/issue-<number>-<short-description>`
