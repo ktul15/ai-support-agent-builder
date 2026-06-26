@@ -1,6 +1,6 @@
 # Chat with Your Business — AI Support Agent Builder
 
-A multi-tenant **RAG SaaS**: an SMB uploads its docs/FAQs/policies and gets a mobile AI support assistant that answers customer questions **with cited sources** — and honestly says *"I don't know"* when the answer isn't in the docs.
+A multi-tenant **RAG SaaS**: an SMB uploads its docs/FAQs/policies and gets a mobile AI support assistant that answers customer questions **with cited sources** — and honestly says _"I don't know"_ when the answer isn't in the docs.
 
 > **The money shot:** upload a 30-page PDF, ask a specific question, get a correct cited answer in ~2 seconds — then ask something off-topic and watch it cleanly refuse.
 
@@ -13,15 +13,15 @@ A multi-tenant **RAG SaaS**: an SMB uploads its docs/FAQs/policies and gets a mo
 
 ## Stack
 
-| Layer | Tech |
-|---|---|
-| Mobile (consumer chat) | Flutter + BLoC + Dio |
-| Admin / builder | Next.js (App Router) |
-| API | Express (Node/TS) + zod |
-| Data | Postgres + pgvector (RLS) · Prisma |
-| Queue / cache | Redis + BullMQ |
-| Storage | Cloudflare R2 / S3 |
-| AI | Claude (generation) · OpenAI/Voyage (embeddings) · Cohere (rerank) |
+| Layer                  | Tech                                                               |
+| ---------------------- | ------------------------------------------------------------------ |
+| Mobile (consumer chat) | Flutter + BLoC + Dio                                               |
+| Admin / builder        | Next.js (App Router)                                               |
+| API                    | Express (Node/TS) + zod                                            |
+| Data                   | Postgres + pgvector (RLS) · Prisma                                 |
+| Queue / cache          | Redis + BullMQ                                                     |
+| Storage                | Cloudflare R2 / S3                                                 |
+| AI                     | Claude (generation) · OpenAI/Voyage (embeddings) · Cohere (rerank) |
 
 ## Architecture
 
