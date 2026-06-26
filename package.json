@@ -18,7 +18,11 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "dev:api": "npm run dev -w @asab/api"
+    "dev:api": "npm run dev -w @asab/api",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:reset": "docker compose down -v && docker compose up -d",
+    "db:logs": "docker compose logs -f"
   },
   "devDependencies": {
     "@eslint/js": "^9.9.0",

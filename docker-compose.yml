@@ -1,0 +1,51 @@
+name: asab
+
+# Local backing services for development. One command:  npm run db:up
+#
+# SOURCE-OF-TRUTH WARNING: the app connects via DATABASE_URL / REDIS_URL in .env,
+# but these containers are configured from the discrete POSTGRES_* / *_PORT vars
+# below. They are NOT linked — if you change a POSTGRES_* value or a port here (or
+# in .env), you MUST update DATABASE_URL / REDIS_URL to match, or the app will pass
+# config validation and then fail at connection time. Defaults match .env.example.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16 # Postgres 16 with the pgvector extension prebuilt
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-asab}
+    ports:
+      - '127.0.0.1:${POSTGRES_PORT:-5433}:5432' # localhost-only; 5433 host-side to avoid a native Postgres on 5432
+    shm_size: 256m # headroom for parallel queries / bulk ingestion later
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro # runs ONCE on an empty data volume
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-asab}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s # don't count cold-start/first-init failures toward retries
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine # minor-pinned for reproducibility across the team
+    # appendonly: persist queue state across restarts.
+    # maxmemory-policy noeviction: REQUIRED by BullMQ — never evict job data.
+    command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
+    ports:
+      - '127.0.0.1:${REDIS_PORT:-6379}:6379' # localhost-only
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:
