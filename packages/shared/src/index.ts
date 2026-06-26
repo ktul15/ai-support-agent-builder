@@ -12,3 +12,5 @@ export const SHARED_PACKAGE = '@asab/shared';
 
 /** Marker type so downstream packages can depend on a real export today. */
 export type TenantId = string & { readonly __brand: 'TenantId' };
+
+export * from './providers.js';
