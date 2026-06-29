@@ -15,6 +15,8 @@ export interface PutObjectInput {
 export interface ObjectStorage {
   /** Upload (or overwrite) an object at `key`. */
   put(input: PutObjectInput): Promise<void>;
+  /** Download an object's full bytes (worker-side). Rejects if absent. */
+  get(key: string): Promise<Buffer>;
   /** A time-limited signed GET URL for `key` (the only way to read). */
   signedReadUrl(key: string, expiresInSeconds?: number): Promise<string>;
   /** Whether an object exists at `key`. */

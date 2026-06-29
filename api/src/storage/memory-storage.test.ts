@@ -10,7 +10,7 @@ describe('MemoryStorage', () => {
     await s.put({ key, body: Buffer.from('hello world'), contentType: 'text/plain' });
     expect(await s.exists(key)).toBe(true);
 
-    const got = s.get(key)!;
+    const got = s.peek(key)!;
     expect(Buffer.from(got.body).toString()).toBe('hello world');
     expect(got.contentType).toBe('text/plain');
 

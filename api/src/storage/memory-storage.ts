@@ -28,6 +28,12 @@ export class MemoryStorage implements ObjectStorage {
     return Promise.resolve();
   }
 
+  get(key: string): Promise<Buffer> {
+    const stored = this.store.get(key);
+    if (!stored) return Promise.reject(new Error(`object not found: ${key}`));
+    return Promise.resolve(Buffer.from(stored.body));
+  }
+
   signedReadUrl(key: string, expiresInSeconds = DEFAULT_SIGNED_URL_TTL_SECONDS): Promise<string> {
     return Promise.resolve(`memory://${key}?expires=${expiresInSeconds}`);
   }
@@ -41,8 +47,8 @@ export class MemoryStorage implements ObjectStorage {
     return Promise.resolve();
   }
 
-  /** Test helper: read back a stored object (no signed-URL round-trip). */
-  get(key: string): StoredObject | undefined {
+  /** Test helper: read back a stored object incl. its content type. */
+  peek(key: string): StoredObject | undefined {
     return this.store.get(key);
   }
 }
