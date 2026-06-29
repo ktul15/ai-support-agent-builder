@@ -17,11 +17,13 @@
     "prisma:studio": "tsx scripts/migrate.ts studio",
     "verify:rls": "tsx scripts/verify-rls.ts",
     "verify:tenant": "tsx scripts/verify-tenant.ts",
+    "verify:auth": "tsx scripts/verify-auth.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.3",
     "@asab/shared": "*",
+    "@node-rs/argon2": "^2.0.2",
     "@prisma/client": "^5.18.0",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
