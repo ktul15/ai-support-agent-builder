@@ -46,13 +46,12 @@ export function withTenant<T>(
   });
 }
 
-/** Drain the connection pool. Call on shutdown so rolling restarts don't leak. */
+/**
+ * Drain the connection pool. Call on shutdown so rolling restarts don't leak.
+ * The server entrypoint (index.ts) owns shutdown ordering — it closes the queue
+ * and the DB together on SIGINT/SIGTERM — so this module registers no signal
+ * handlers of its own (verify scripts call it explicitly in their teardown).
+ */
 export async function disconnectDb(): Promise<void> {
   await prisma.$disconnect();
-}
-
-for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-  process.once(signal, () => {
-    void disconnectDb().finally(() => process.exit(0));
-  });
 }

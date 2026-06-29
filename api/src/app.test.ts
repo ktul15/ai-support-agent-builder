@@ -1,9 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { createApp } from './app.js';
+import { createApp, type AppDeps } from './app.js';
+import { MemoryStorage } from './storage/memory-storage.js';
+
+// Fake deps so createApp doesn't reach for config / Redis / S3 in unit tests.
+const testDeps: AppDeps = {
+  storage: new MemoryStorage(),
+  queue: { enqueue: () => Promise.resolve(), close: () => Promise.resolve() },
+  maxBytes: 1024 * 1024,
+};
 
 describe('app', () => {
   it('exposes a health endpoint', async () => {
-    const app = createApp();
+    const app = createApp(testDeps);
     // Bind to an ephemeral port, hit /health, assert the contract.
     const server = app.listen(0);
     const address = server.address();

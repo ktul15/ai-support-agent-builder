@@ -1,6 +1,14 @@
 import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 import type { Server } from 'node:http';
-import { createApp } from '../app.js';
+import { createApp, type AppDeps } from '../app.js';
+import { MemoryStorage } from '../storage/memory-storage.js';
+
+// Fake deps so createApp doesn't reach for config / Redis / S3 in unit tests.
+const testDeps: AppDeps = {
+  storage: new MemoryStorage(),
+  queue: { enqueue: () => Promise.resolve(), close: () => Promise.resolve() },
+  maxBytes: 1024 * 1024,
+};
 
 // Validation-only tests: malformed bodies are rejected BEFORE any DB call, so
 // these run without a database. The full signup/login round-trip against the
@@ -9,7 +17,7 @@ let server: Server;
 let base: string;
 
 beforeAll(async () => {
-  server = createApp().listen(0);
+  server = createApp(testDeps).listen(0);
   await new Promise<void>((resolve) => server.once('listening', resolve));
   const addr = server.address();
   const port = typeof addr === 'object' && addr ? addr.port : 0;
