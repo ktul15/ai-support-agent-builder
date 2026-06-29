@@ -15,6 +15,10 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-asab}
+      # Password for the restricted `asab_app` runtime role, consumed by
+      # db/init/002-app-role.sh on first boot. Dev default only — prod provisions
+      # the role out-of-band with a real secret. Keep in sync with DATABASE_URL.
+      ASAB_APP_PASSWORD: ${ASAB_APP_PASSWORD:-asab_app_dev_pw}
     ports:
       - '127.0.0.1:${POSTGRES_PORT:-5433}:5432' # localhost-only; 5433 host-side to avoid a native Postgres on 5432
     shm_size: 256m # headroom for parallel queries / bulk ingestion later

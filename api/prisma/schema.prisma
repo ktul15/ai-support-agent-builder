@@ -16,8 +16,11 @@ generator client {
 }
 
 datasource db {
-  provider   = "postgresql"
+  provider = "postgresql"
+  // Runtime connects as the restricted `asab_app` role so RLS applies.
   url        = env("DATABASE_URL")
+  // Migrations/introspection use the owner role (RLS/ownership bypass for DDL).
+  directUrl  = env("DIRECT_DATABASE_URL")
   extensions = [vector]
 }
 
