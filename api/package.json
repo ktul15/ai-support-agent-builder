@@ -6,8 +6,10 @@
   "main": "./dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "dev:worker": "tsx watch src/worker/index.ts",
     "build": "tsc -b",
     "start": "node dist/index.js",
+    "start:worker": "node dist/worker/index.js",
     "typecheck": "tsc -b",
     "test": "vitest run",
     "prisma:generate": "prisma generate",
@@ -20,6 +22,7 @@
     "verify:auth": "tsx scripts/verify-auth.ts",
     "verify:storage": "tsx scripts/verify-storage.ts",
     "verify:upload": "tsx scripts/verify-upload.ts",
+    "verify:worker": "tsx scripts/verify-worker.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {
