@@ -79,8 +79,12 @@ model AppUser {
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  // Email is unique per tenant, not globally. The unique's leading column also
-  // serves tenant-prefix lookups, so no separate tenant_id index is needed.
+  // Email is GLOBALLY unique: login resolves a user by email alone (pre-tenant
+  // context), so it must be unambiguous. This DB constraint is the authoritative
+  // backstop against the signup TOCTOU race — the app-level pre-check can't be.
+  @@unique([email])
+  // Composite kept for the tenant-prefix index it provides (no separate
+  // tenant_id index needed); it is subsumed by the global unique for uniqueness.
   @@unique([tenantId, email])
   @@map("app_user")
 }
