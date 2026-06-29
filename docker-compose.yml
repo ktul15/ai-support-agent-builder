@@ -50,6 +50,30 @@ services:
       start_period: 5s
     restart: unless-stopped
 
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z # S3-compatible local object storage (stands in for R2/S3)
+    command: ['server', '/data', '--console-address', ':9001']
+    environment:
+      # Credentials double as the S3 access key/secret the app uses. Dev defaults
+      # only; the bucket itself is created on demand by `npm run verify:storage`.
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-minioadmin}
+    ports:
+      - '127.0.0.1:${MINIO_PORT:-9000}:9000' # S3 API; localhost-only
+      - '127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001' # web console; localhost-only
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      # `mc` and the `local` alias ship inside this minio image tag (verified),
+      # so the readiness probe runs in-container without a separate mc image.
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
 volumes:
   postgres-data:
   redis-data:
+  minio-data:
