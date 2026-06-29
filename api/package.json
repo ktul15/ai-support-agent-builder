@@ -18,11 +18,14 @@
     "verify:rls": "tsx scripts/verify-rls.ts",
     "verify:tenant": "tsx scripts/verify-tenant.ts",
     "verify:auth": "tsx scripts/verify-auth.ts",
+    "verify:storage": "tsx scripts/verify-storage.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.3",
     "@asab/shared": "*",
+    "@aws-sdk/client-s3": "^3.1075.0",
+    "@aws-sdk/s3-request-presigner": "^3.1075.0",
     "@node-rs/argon2": "^2.0.2",
     "@prisma/client": "^5.18.0",
     "dotenv": "^16.4.5",
