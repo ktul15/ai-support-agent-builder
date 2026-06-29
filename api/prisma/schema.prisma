@@ -121,6 +121,8 @@ model Document {
   pageCount   Int?           @map("page_count")
   status      DocumentStatus @default(QUEUED)
   error       String?
+  // Non-fatal parse warnings (e.g. low-text/scanned pages) surfaced in the UI (#18).
+  warnings    String[]       @default([])
   createdAt   DateTime       @default(now()) @map("created_at")
   updatedAt   DateTime       @updatedAt @map("updated_at")
 

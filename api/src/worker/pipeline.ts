@@ -1,6 +1,13 @@
-import type { DocumentStatus } from '@prisma/client';
+import type { DocumentStatus, SourceType } from '@prisma/client';
 import type { IngestJobData } from '../queue/index.js';
-import { tenantObjectKey, type ObjectStorage } from '../storage/index.js';
+import type { ObjectStorage } from '../storage/index.js';
+import { parseDocument, ParseError } from '../ingestion/parsing/index.js';
+
+/** Where a document's raw bytes live and how to parse them. */
+export interface DocumentRef {
+  storageKey: string;
+  sourceType: SourceType;
+}
 
 /** Minimal port the pipeline needs to read/advance a document's lifecycle. */
 export interface DocumentStatusStore {
@@ -12,6 +19,14 @@ export interface DocumentStatusStore {
    * FAILED). Implementations guard on `status != READY`.
    */
   markFailed(documentId: string, tenantId: string, error: string): Promise<void>;
+  /** Storage location + format for the parse stage (null if not visible). */
+  getRef(documentId: string, tenantId: string): Promise<DocumentRef | null>;
+  /** Record the parse result: page count + any non-fatal warnings. */
+  setParseResult(
+    documentId: string,
+    tenantId: string,
+    result: { pageCount: number; warnings: string[] },
+  ): Promise<void>;
 }
 
 export interface IngestDeps {
@@ -38,12 +53,23 @@ const parseStage: IngestStage = {
   name: 'parse',
   startStatus: 'PARSING',
   async run(job, deps) {
-    // #14 (parse) + #15 (chunk) implement this. The skeleton asserts the raw
-    // object is retrievable, so a missing blob fails loudly at the right stage.
-    const key = tenantObjectKey(job.tenantId, job.documentId);
-    if (!(await deps.storage.exists(key))) {
-      throw new Error(`raw object not found in storage: ${key}`);
+    const ref = await deps.store.getRef(job.documentId, job.tenantId);
+    if (!ref) throw new Error(`document not found: ${job.documentId}`);
+    // Download the raw bytes (rejects if the object is missing) and parse them.
+    // parseDocument validates the content matches the declared type, so a
+    // spoofed/corrupt file fails here and the document ends FAILED.
+    const bytes = await deps.storage.get(ref.storageKey);
+    const parsed = await parseDocument(bytes, ref.sourceType);
+    // No extractable text (e.g. a scanned/image-only PDF) is a failure, not a
+    // silently-READY empty document the assistant can never answer from.
+    if (parsed.text.trim().length === 0) {
+      throw new ParseError('no extractable text — document may be scanned or image-only');
     }
+    await deps.store.setParseResult(job.documentId, job.tenantId, {
+      pageCount: parsed.pageCount,
+      warnings: parsed.warnings,
+    });
+    // #15 (chunk) consumes `parsed` here.
   },
 };
 

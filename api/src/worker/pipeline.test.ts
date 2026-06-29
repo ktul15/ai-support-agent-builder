@@ -35,6 +35,12 @@ class FakeStore implements DocumentStatusStore {
     }
     return Promise.resolve();
   }
+  getRef(): Promise<{ storageKey: string; sourceType: 'TXT' }> {
+    return Promise.resolve({ storageKey: 'some-key', sourceType: 'TXT' });
+  }
+  setParseResult(): Promise<void> {
+    return Promise.resolve();
+  }
 }
 
 // Two spy stages mirroring the real shape (PARSING then EMBEDDING).
@@ -114,8 +120,17 @@ describe('runIngestion', () => {
 
   it('default parse stage fails when the raw object is missing', async () => {
     const store = new FakeStore('UPLOADED');
-    // MemoryStorage is empty -> exists() false -> parse throws.
-    await expect(runIngestion(JOB, deps(store))).rejects.toThrow('raw object not found');
+    // MemoryStorage is empty -> storage.get rejects -> parse throws.
+    await expect(runIngestion(JOB, deps(store))).rejects.toThrow('object not found');
+    expect(store.history).toEqual(['PARSING']);
+  });
+
+  it('default parse stage fails a document with no extractable text', async () => {
+    const store = new FakeStore('UPLOADED');
+    const storage = new MemoryStorage();
+    // FakeStore.getRef reports a TXT object; store whitespace-only content there.
+    await storage.put({ key: 'some-key', body: Buffer.from('   \n  '), contentType: 'text/plain' });
+    await expect(runIngestion(JOB, { store, storage })).rejects.toThrow('no extractable text');
     expect(store.history).toEqual(['PARSING']);
   });
 });

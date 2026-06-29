@@ -64,6 +64,12 @@ export class S3Storage implements ObjectStorage {
     );
   }
 
+  async get(key: string): Promise<Buffer> {
+    const res = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+    if (!res.Body) throw new Error(`empty object body: ${key}`);
+    return Buffer.from(await res.Body.transformToByteArray());
+  }
+
   async signedReadUrl(
     key: string,
     expiresInSeconds = DEFAULT_SIGNED_URL_TTL_SECONDS,

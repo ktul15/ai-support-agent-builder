@@ -11,6 +11,7 @@
 import { config } from 'dotenv';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
 import type { Server } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
@@ -19,7 +20,7 @@ import { Redis } from 'ioredis';
 import { getConfig } from '../src/config.js';
 import { createApp } from '../src/app.js';
 import { disconnectDb } from '../src/db.js';
-import { createStorage } from '../src/storage/index.js';
+import { S3Storage } from '../src/storage/index.js';
 import { BullIngestQueue, INGEST_QUEUE_NAME } from '../src/queue/index.js';
 import { createIngestWorker } from '../src/worker/ingest-worker.js';
 import { PrismaDocumentStatusStore } from '../src/worker/document-store.js';
@@ -31,7 +32,13 @@ if (!ownerUrl) throw new Error('DIRECT_DATABASE_URL (owner) required to seed/ins
 
 const appConfig = getConfig();
 const owner = new PrismaClient({ datasources: { db: { url: ownerUrl } } });
-const storage = createStorage(appConfig);
+const storage = new S3Storage({
+  endpoint: appConfig.S3_ENDPOINT,
+  region: appConfig.S3_REGION!,
+  bucket: appConfig.S3_BUCKET!,
+  accessKeyId: appConfig.S3_ACCESS_KEY_ID!,
+  secretAccessKey: appConfig.S3_SECRET_ACCESS_KEY!,
+});
 const queue = new BullIngestQueue(appConfig.REDIS_URL);
 const rawConnection = new Redis(appConfig.REDIS_URL, { maxRetriesPerRequest: null });
 const rawQueue = new Queue(INGEST_QUEUE_NAME, { connection: rawConnection });
@@ -70,6 +77,7 @@ async function waitForStatus(
 }
 
 async function main() {
+  await storage.ensureBucket();
   const app = createApp({ storage, queue, maxBytes: appConfig.UPLOAD_MAX_BYTES });
   const server: Server = app.listen(0);
   await new Promise<void>((r) => server.once('listening', r));
@@ -91,10 +99,13 @@ async function main() {
   const assistantId = randomUUID();
   await owner.$executeRaw`INSERT INTO assistant (id,tenant_id,name,updated_at) VALUES (${assistantId}::uuid, ${tenantId}::uuid, 'A', now())`;
 
-  // Happy path: upload -> worker -> READY.
+  // Happy path: upload a REAL pdf -> worker parses it -> READY.
+  const pdfBytes = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), '../test/fixtures/sample.pdf'),
+  );
   const fd = new FormData();
   fd.append('assistantId', assistantId);
-  fd.append('file', new Blob(['hello document'], { type: 'application/pdf' }), 'doc.pdf');
+  fd.append('file', new Blob([pdfBytes], { type: 'application/pdf' }), 'doc.pdf');
   const upRes = await fetch(`${base}/documents`, {
     method: 'POST',
     headers: { authorization: `Bearer ${token}` },
@@ -109,6 +120,16 @@ async function main() {
     'worker consumes the job and advances the document to READY',
     ok?.status === 'READY',
     ok?.status ?? 'timeout',
+  );
+
+  // The parse stage persisted the page count from the real PDF.
+  const pc = await owner.$queryRaw<
+    { page_count: number | null }[]
+  >`SELECT page_count FROM document WHERE id = ${documentId}::uuid`;
+  check(
+    'parse stage recorded the page count',
+    pc[0]?.page_count === 1,
+    `page_count=${pc[0]?.page_count}`,
   );
 
   // Idempotency against the REAL Prisma store: re-enqueue the same (now READY)
@@ -155,6 +176,28 @@ async function main() {
     'a job whose object is missing ends FAILED with an error',
     failed?.status === 'FAILED' && !!failed.error,
     failed ? `${failed.status}: ${failed.error?.slice(0, 40)}` : 'timeout',
+  );
+
+  // Scanned / no-text PDF: parses but yields no text -> FAILED (not silently READY).
+  const scannedBytes = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), '../test/fixtures/lowtext.pdf'),
+  );
+  const scannedForm = new FormData();
+  scannedForm.append('assistantId', assistantId);
+  scannedForm.append('file', new Blob([scannedBytes], { type: 'application/pdf' }), 'scan.pdf');
+  const scanRes = await fetch(`${base}/documents`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: scannedForm,
+  });
+  const scanned = (await scanRes.json()) as { documentId: string };
+  jobIds.push(scanned.documentId);
+  keys.push(`tenants/${tenantId}/${scanned.documentId}/original`);
+  const scannedFailed = await waitForStatus(scanned.documentId, 'FAILED');
+  check(
+    'a scanned/no-text PDF ends FAILED (not silently READY)',
+    scannedFailed?.status === 'FAILED' && !!scannedFailed.error,
+    scannedFailed ? scannedFailed.error?.slice(0, 40) : 'timeout',
   );
 
   await new Promise<void>((r) => server.close(() => r()));

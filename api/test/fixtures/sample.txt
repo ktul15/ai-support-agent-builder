@@ -1,0 +1,5 @@
+Welcome to Acme Support.
+
+Our office hours are Monday to Friday, 9am to 5pm.
+
+For urgent issues, contact the on-call engineer.
