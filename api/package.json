@@ -11,9 +11,11 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev",
-    "prisma:deploy": "prisma migrate deploy",
-    "prisma:studio": "prisma studio",
+    "prisma:migrate": "tsx scripts/migrate.ts migrate dev",
+    "prisma:deploy": "tsx scripts/migrate.ts migrate deploy",
+    "prisma:status": "tsx scripts/migrate.ts migrate status",
+    "prisma:studio": "tsx scripts/migrate.ts studio",
+    "verify:rls": "tsx scripts/verify-rls.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {

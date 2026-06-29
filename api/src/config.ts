@@ -17,7 +17,10 @@ const schema = z.object({
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 
   // Infrastructure (required — fail fast if absent)
+  // Runtime connection (restricted asab_app role; RLS applies).
   DATABASE_URL: z.string().url(),
+  // Owner connection for migrations only (Prisma directUrl). Optional at runtime.
+  DIRECT_DATABASE_URL: z.string().url().optional(),
   REDIS_URL: z.string().url(),
 
   // Auth
