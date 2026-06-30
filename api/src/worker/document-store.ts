@@ -118,20 +118,28 @@ export class PrismaDocumentStatusStore implements DocumentStatusStore {
     );
   }
 
-  setChunkEmbeddings(tenantId: string, updates: { id: string; vector: number[] }[]): Promise<void> {
-    if (updates.length === 0) return Promise.resolve();
+  setChunkEmbeddings(
+    tenantId: string,
+    documentId: string,
+    updates: { id: string; vector: number[] }[],
+  ): Promise<void> {
     return withTenant(tenantId, async (tx) => {
-      // embedding is an Unsupported(vector) column, so it's written via raw SQL.
-      // One statement via unnest (not a per-row loop): the id/vector arrays are
-      // bound as parameters and zipped server-side; RLS scopes the UPDATE to this
-      // tenant, and the pgvector text form '[a,b,...]' is cast to vector.
-      const ids = updates.map((u) => u.id);
-      const vectors = updates.map((u) => `[${u.vector.join(',')}]`);
-      await tx.$executeRaw`
-        UPDATE chunk AS c
-        SET embedding = d.vec::vector
-        FROM (SELECT unnest(${ids}::uuid[]) AS id, unnest(${vectors}::text[]) AS vec) AS d
-        WHERE c.id = d.id`;
+      if (updates.length > 0) {
+        // embedding is an Unsupported(vector) column, so it's written via raw SQL.
+        // One statement via unnest (not a per-row loop): the id/vector arrays are
+        // bound as parameters and zipped server-side; RLS scopes the UPDATE to
+        // this tenant, and the pgvector text form '[a,b,...]' is cast to vector.
+        const ids = updates.map((u) => u.id);
+        const vectors = updates.map((u) => `[${u.vector.join(',')}]`);
+        await tx.$executeRaw`
+          UPDATE chunk AS c
+          SET embedding = d.vec::vector
+          FROM (SELECT unnest(${ids}::uuid[]) AS id, unnest(${vectors}::text[]) AS vec) AS d
+          WHERE c.id = d.id`;
+      }
+      // Heartbeat the document so the reconciler sees an actively-embedding doc
+      // as live (updated_at fresh) even though only chunk rows are being written.
+      await tx.$executeRaw`UPDATE document SET updated_at = now() WHERE id = ${documentId}::uuid`;
     });
   }
 }

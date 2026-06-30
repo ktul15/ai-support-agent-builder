@@ -63,8 +63,16 @@ export interface DocumentStatusStore {
     documentId: string,
     tenantId: string,
   ): Promise<{ id: string; content: string }[]>;
-  /** Write embedding vectors onto the given chunks (raw SQL — Unsupported column). */
-  setChunkEmbeddings(tenantId: string, updates: { id: string; vector: number[] }[]): Promise<void>;
+  /**
+   * Write embedding vectors onto the given chunks (raw SQL — Unsupported column)
+   * AND bump the document's updated_at, so the reconciler treats a long-running
+   * embed as live (it heartbeats per batch) rather than stuck.
+   */
+  setChunkEmbeddings(
+    tenantId: string,
+    documentId: string,
+    updates: { id: string; vector: number[] }[],
+  ): Promise<void>;
 }
 
 export interface IngestDeps {
@@ -164,9 +172,10 @@ const embedStage: IngestStage = {
         }
         return { id: chunk.id, vector };
       });
-      // Persist each batch as it completes, so a later failure resumes from the
-      // remainder instead of re-embedding everything.
-      await deps.store.setChunkEmbeddings(job.tenantId, updates);
+      // Persist each batch as it completes (also heartbeats the document), so a
+      // later failure resumes from the remainder and the reconciler doesn't fail
+      // a long-running embed mid-flight.
+      await deps.store.setChunkEmbeddings(job.tenantId, job.documentId, updates);
     }
   },
 };

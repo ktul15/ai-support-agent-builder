@@ -55,7 +55,13 @@ class FakeStore implements DocumentStatusStore {
   getUnembeddedChunks(): Promise<{ id: string; content: string }[]> {
     return Promise.resolve(this.pending);
   }
-  setChunkEmbeddings(_t: string, updates: { id: string; vector: number[] }[]): Promise<void> {
+  embedBatches = 0;
+  setChunkEmbeddings(
+    _t: string,
+    _d: string,
+    updates: { id: string; vector: number[] }[],
+  ): Promise<void> {
+    this.embedBatches++;
     this.embedded.push(...updates);
     this.pending = this.pending.filter((p) => !updates.some((u) => u.id === p.id));
     return Promise.resolve();
@@ -167,6 +173,14 @@ describe('runIngestion', () => {
     expect(store.embedded.map((e) => e.id)).toEqual(['c1', 'c2']);
     expect(store.embedded[0]!.vector.length).toBe(1536);
     expect(store.history).toEqual(['READY']);
+  });
+
+  it('embed stage persists (and heartbeats) per batch of 128', async () => {
+    const store = new FakeStore('EMBEDDING');
+    store.pending = Array.from({ length: 200 }, (_, i) => ({ id: `c${i}`, content: `chunk ${i}` }));
+    await runIngestion(JOB, deps(store));
+    expect(store.embedded).toHaveLength(200);
+    expect(store.embedBatches).toBe(2); // 128 + 72 -> two setChunkEmbeddings calls
   });
 
   it('embed stage is a no-op when nothing is pending', async () => {
