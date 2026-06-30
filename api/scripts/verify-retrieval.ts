@@ -16,6 +16,7 @@ import { randomUUID } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { retrieveChunks } from '../src/retrieval/retrieve.js';
 import { createRetrievalService } from '../src/retrieval/retrieval-service.js';
+import { assembleContext } from '../src/chat/prompt-assembly.js';
 import { disconnectDb } from '../src/db.js';
 import { FakeEmbedder } from '../src/providers/fake-embedder.js';
 
@@ -83,9 +84,10 @@ async function main() {
       top?.content === target &&
       top.score > 0.99 &&
       typeof top.documentId === 'string' &&
+      top.title === 'D' &&
       top.page === 1 &&
       top.section === 'S',
-    top ? `top="${top.content}" score=${top.score?.toFixed(4)}` : 'no hits',
+    top ? `top="${top.content}" title="${top.title}" score=${top.score?.toFixed(4)}` : 'no hits',
   );
 
   // 2. Cross-tenant isolation: querying tenant A for tenant B's assistant -> nothing.
@@ -120,11 +122,13 @@ async function main() {
     await tx.$executeRawUnsafe(`SET LOCAL hnsw.iterative_scan = 'strict_order'`);
     await tx.$executeRawUnsafe(`SET LOCAL enable_seqscan = off`);
     await tx.$executeRawUnsafe(`SET LOCAL enable_sort = off`);
+    // The real (joined) query, so the plan check mirrors what retrieveChunks runs.
     return tx.$queryRawUnsafe<{ 'QUERY PLAN': string }[]>(
       `EXPLAIN (FORMAT TEXT)
-       SELECT id FROM chunk
-       WHERE tenant_id = '${tenantA}'::uuid AND assistant_id = '${a1}'::uuid AND embedding IS NOT NULL
-       ORDER BY embedding <=> '${vecLiteral(queryEmbedding!)}'::vector LIMIT 5`,
+       SELECT c.id FROM chunk c
+       JOIN document d ON d.id = c.document_id
+       WHERE c.tenant_id = '${tenantA}'::uuid AND c.assistant_id = '${a1}'::uuid AND c.embedding IS NOT NULL
+       ORDER BY c.embedding <=> '${vecLiteral(queryEmbedding!)}'::vector LIMIT 5`,
     );
   });
   const planText = plan.map((r) => r['QUERY PLAN']).join('\n');
@@ -146,6 +150,17 @@ async function main() {
     'retrieval service embeds the question and returns k ranked chunks',
     serviceHits.length === 3 && serviceHits[0]?.content === target,
     serviceHits[0] ? `top="${serviceHits[0].content}" k=${serviceHits.length}` : 'no hits',
+  );
+
+  // 6. Prompt assembly (#21): chunks -> numbered, deterministic sources block.
+  const ctx = assembleContext(serviceHits);
+  check(
+    'prompt assembly numbers sources [1]..[n] with title/page',
+    ctx.sources.length === 3 &&
+      ctx.sources[0]?.marker === 1 &&
+      ctx.text.startsWith('[1] "D" — page 1') &&
+      ctx.text.includes('[3]'),
+    ctx.text.split('\n')[0]?.slice(0, 40),
   );
 }
 
