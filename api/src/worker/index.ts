@@ -1,6 +1,7 @@
 import { getConfig } from '../config.js';
 import { disconnectDb } from '../db.js';
 import { createStorage } from '../storage/index.js';
+import { createProviders } from '../providers/index.js';
 import { createIngestWorker } from './ingest-worker.js';
 import { PrismaDocumentStatusStore } from './document-store.js';
 
@@ -11,6 +12,7 @@ try {
     redisUrl: config.REDIS_URL,
     store: new PrismaDocumentStatusStore(),
     storage: createStorage(config),
+    embedder: createProviders(config).embedder,
   });
   console.log('ingest worker started');
 

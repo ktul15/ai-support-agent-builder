@@ -13,9 +13,10 @@ export interface Providers {
   reranker: Reranker;
 }
 
-// Native width of text-embedding-3-small. If EMBEDDING_MODEL changes, this must
-// change too — and the corpus must be re-embedded (vector width is fixed).
-const EMBEDDING_DIMENSIONS = 1536;
+// Native width of text-embedding-3-small AND the chunk.embedding column
+// (vector(1536)). If EMBEDDING_MODEL changes, this must change too — and the
+// corpus must be re-embedded (vector width is fixed). Single source of truth.
+export const EMBEDDING_DIMENSIONS = 1536;
 
 /**
  * Build the concrete providers selected by config. The single place vendor SDKs

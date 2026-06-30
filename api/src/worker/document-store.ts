@@ -103,4 +103,35 @@ export class PrismaDocumentStatusStore implements DocumentStatusStore {
       return { inserted, total: chunks.length };
     });
   }
+
+  getUnembeddedChunks(
+    documentId: string,
+    tenantId: string,
+  ): Promise<{ id: string; content: string }[]> {
+    return withTenant(
+      tenantId,
+      (tx) =>
+        tx.$queryRaw<{ id: string; content: string }[]>`
+        SELECT id, content FROM chunk
+        WHERE document_id = ${documentId}::uuid AND embedding IS NULL
+        ORDER BY char_start`,
+    );
+  }
+
+  setChunkEmbeddings(tenantId: string, updates: { id: string; vector: number[] }[]): Promise<void> {
+    if (updates.length === 0) return Promise.resolve();
+    return withTenant(tenantId, async (tx) => {
+      // embedding is an Unsupported(vector) column, so it's written via raw SQL.
+      // One statement via unnest (not a per-row loop): the id/vector arrays are
+      // bound as parameters and zipped server-side; RLS scopes the UPDATE to this
+      // tenant, and the pgvector text form '[a,b,...]' is cast to vector.
+      const ids = updates.map((u) => u.id);
+      const vectors = updates.map((u) => `[${u.vector.join(',')}]`);
+      await tx.$executeRaw`
+        UPDATE chunk AS c
+        SET embedding = d.vec::vector
+        FROM (SELECT unnest(${ids}::uuid[]) AS id, unnest(${vectors}::text[]) AS vec) AS d
+        WHERE c.id = d.id`;
+    });
+  }
 }

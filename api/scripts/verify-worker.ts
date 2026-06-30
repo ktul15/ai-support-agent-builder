@@ -24,6 +24,7 @@ import { S3Storage } from '../src/storage/index.js';
 import { BullIngestQueue, INGEST_QUEUE_NAME } from '../src/queue/index.js';
 import { createIngestWorker } from '../src/worker/ingest-worker.js';
 import { PrismaDocumentStatusStore } from '../src/worker/document-store.js';
+import { FakeEmbedder } from '../src/providers/fake-embedder.js';
 
 config({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../..', '.env') });
 
@@ -46,6 +47,9 @@ const workerHandle = createIngestWorker({
   redisUrl: appConfig.REDIS_URL,
   store: new PrismaDocumentStatusStore(),
   storage,
+  // Deterministic offline embedder — proves the embed pipeline end-to-end
+  // without calling (or paying for) OpenAI. Production uses the real embedder.
+  embedder: new FakeEmbedder(),
   concurrency: 2,
 });
 
@@ -132,17 +136,21 @@ async function main() {
     `page_count=${pc[0]?.page_count}`,
   );
 
-  // Chunks were persisted with a real sha256 content_hash and NO embedding yet
-  // (that's #17). A sample hash must be 64 hex chars; embedding count must be 0.
+  // Chunks persisted with a real sha256 content_hash AND a 1536-dim embedding
+  // vector (the embed stage filled them before READY).
   const chunkStats = await owner.$queryRaw<
-    { n: number; embedded: number; sample_hash: string | null }[]
-  >`SELECT count(*)::int AS n, count(embedding)::int AS embedded, min(content_hash) AS sample_hash
+    { n: number; embedded: number; dims: number | null; sample_hash: string | null }[]
+  >`SELECT count(*)::int AS n, count(embedding)::int AS embedded,
+           min(vector_dims(embedding))::int AS dims, min(content_hash) AS sample_hash
     FROM chunk WHERE document_id = ${documentId}::uuid`;
   const cs = chunkStats[0]!;
   check(
-    'chunks persisted with a sha256 content_hash, no embedding yet',
-    cs.n >= 1 && cs.embedded === 0 && /^[0-9a-f]{64}$/.test(cs.sample_hash ?? ''),
-    `n=${cs.n} embedded=${cs.embedded} hash=${cs.sample_hash?.slice(0, 12)}…`,
+    'chunks persisted with sha256 hash + 1536-dim embedding',
+    cs.n >= 1 &&
+      cs.embedded === cs.n &&
+      cs.dims === 1536 &&
+      /^[0-9a-f]{64}$/.test(cs.sample_hash ?? ''),
+    `n=${cs.n} embedded=${cs.embedded} dims=${cs.dims} hash=${cs.sample_hash?.slice(0, 12)}…`,
   );
 
   // Dedup: re-run parse on the SAME document (force it back to UPLOADED) — the
@@ -157,12 +165,13 @@ async function main() {
   );
   const reParsed = await waitForStatus(documentId, 'READY'); // must actually re-run, not fail early
   const afterDedup = await owner.$queryRaw<
-    { n: number }[]
-  >`SELECT count(*)::int AS n FROM chunk WHERE document_id = ${documentId}::uuid`;
+    { n: number; embedded: number }[]
+  >`SELECT count(*)::int AS n, count(embedding)::int AS embedded
+    FROM chunk WHERE document_id = ${documentId}::uuid`;
   check(
-    're-parsing the same document inserts no duplicate chunks',
-    reParsed?.status === 'READY' && afterDedup[0]!.n === cs.n,
-    `reparsed=${reParsed?.status} before=${cs.n} after=${afterDedup[0]!.n}`,
+    're-parsing the same document: no duplicate chunks, embeddings preserved',
+    reParsed?.status === 'READY' && afterDedup[0]!.n === cs.n && afterDedup[0]!.embedded === cs.n,
+    `reparsed=${reParsed?.status} n=${afterDedup[0]!.n} embedded=${afterDedup[0]!.embedded}`,
   );
 
   // Idempotency against the REAL Prisma store: re-enqueue the same (now READY)
