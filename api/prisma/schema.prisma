@@ -1,0 +1,217 @@
+// Multi-tenant data model for the AI support agent builder.
+//
+// INVARIANT: every domain row carries `tenantId`, and tenant consistency is
+// enforced at the DB via COMPOSITE foreign keys — a child's (tenant_id, ...)
+// must match its parent's, so no row can reference a parent in another tenant.
+// This makes the RLS policies in issue #8 trustworthy (RLS enforces isolation;
+// these FKs enforce that the tenant_id a row carries is the *correct* one).
+//
+// `chunk.embedding` is an Unsupported pgvector column, so reads/writes of vectors
+// go through raw SQL ($queryRaw/$executeRaw). The HNSW vector index + RLS land in
+// issue #8.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider = "postgresql"
+  // Runtime connects as the restricted `asab_app` role so RLS applies.
+  url        = env("DATABASE_URL")
+  // Migrations/introspection use the owner role (RLS/ownership bypass for DDL).
+  directUrl  = env("DIRECT_DATABASE_URL")
+  extensions = [vector]
+}
+
+enum UserRole {
+  OWNER
+  MEMBER
+}
+
+enum AssistantStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum DocumentStatus {
+  QUEUED // row created, ingestion job not yet picked up
+  UPLOADED
+  PARSING
+  EMBEDDING
+  READY
+  FAILED
+}
+
+enum SourceType {
+  PDF
+  DOCX
+  MD
+  TXT
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+}
+
+model Tenant {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  plan      String   @default("free")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Only the directly-owned tables FK to tenant; everything deeper inherits the
+  // tenant via composite FKs to its parent (see header).
+  users      AppUser[]
+  assistants Assistant[]
+
+  @@map("tenant")
+}
+
+model AppUser {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  email        String
+  passwordHash String   @map("password_hash")
+  role         UserRole @default(OWNER)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Email is GLOBALLY unique: login resolves a user by email alone (pre-tenant
+  // context), so it must be unambiguous. This DB constraint is the authoritative
+  // backstop against the signup TOCTOU race — the app-level pre-check can't be.
+  @@unique([email])
+  // Composite kept for the tenant-prefix index it provides (no separate
+  // tenant_id index needed); it is subsumed by the global unique for uniqueness.
+  @@unique([tenantId, email])
+  @@map("app_user")
+}
+
+model Assistant {
+  id               String          @id @default(uuid()) @db.Uuid
+  tenantId         String          @map("tenant_id") @db.Uuid
+  name             String
+  systemPrompt     String?         @map("system_prompt")
+  model            String          @default("claude-haiku-4-5")
+  refusalThreshold Float           @default(0.35) @map("refusal_threshold")
+  status           AssistantStatus @default(DRAFT)
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  documents     Document[]
+  conversations Conversation[]
+  apiKeys       ApiKey[]
+
+  // Target for composite FKs from children (id + tenant_id together).
+  @@unique([id, tenantId])
+  @@index([tenantId])
+  @@map("assistant")
+}
+
+model Document {
+  id          String         @id @default(uuid()) @db.Uuid
+  tenantId    String         @map("tenant_id") @db.Uuid
+  assistantId String         @map("assistant_id") @db.Uuid
+  title       String
+  sourceType  SourceType     @map("source_type")
+  storageKey  String         @map("storage_key")
+  pageCount   Int?           @map("page_count")
+  status      DocumentStatus @default(QUEUED)
+  error       String?
+  // Non-fatal parse warnings (e.g. low-text/scanned pages) surfaced in the UI (#18).
+  warnings    String[]       @default([])
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  // Composite FK: a document's tenant MUST match its assistant's tenant.
+  assistant Assistant @relation(fields: [assistantId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  chunks    Chunk[]
+
+  // Target for chunk's composite FK (id + tenant_id + assistant_id together).
+  @@unique([id, tenantId, assistantId])
+  @@index([tenantId, assistantId])
+  @@index([assistantId, createdAt])
+  @@map("document")
+}
+
+model Chunk {
+  id          String  @id @default(uuid()) @db.Uuid
+  tenantId    String  @map("tenant_id") @db.Uuid
+  documentId  String  @map("document_id") @db.Uuid
+  assistantId String  @map("assistant_id") @db.Uuid
+  content     String
+  tokenCount  Int     @map("token_count")
+  page        Int?
+  section     String?
+  charStart   Int?    @map("char_start")
+  charEnd     Int?    @map("char_end")
+  contentHash String  @map("content_hash")
+
+  // pgvector column; HNSW index added in issue #8. Not on the typed client
+  // (Unsupported) — read/write via raw SQL.
+  embedding Unsupported("vector(1536)")?
+
+  // Composite FK: a chunk's tenant + assistant MUST match its document's. The
+  // single guarantee that retrieval can never surface another tenant's content.
+  document Document @relation(fields: [documentId, tenantId, assistantId], references: [id, tenantId, assistantId], onDelete: Cascade)
+
+  // Dedup identical chunks within an assistant's corpus.
+  @@unique([tenantId, assistantId, contentHash])
+  @@index([tenantId, assistantId])
+  @@index([documentId])
+  @@map("chunk")
+}
+
+model Conversation {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  assistantId String   @map("assistant_id") @db.Uuid
+  endUserRef  String?  @map("end_user_ref")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  assistant Assistant @relation(fields: [assistantId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  messages  Message[]
+
+  @@unique([id, tenantId])
+  @@index([tenantId, assistantId])
+  @@map("conversation")
+}
+
+model Message {
+  id             String      @id @default(uuid()) @db.Uuid
+  conversationId String      @map("conversation_id") @db.Uuid
+  tenantId       String      @map("tenant_id") @db.Uuid
+  role           MessageRole
+  content        String
+  citations      Json?
+  latencyMs      Int?        @map("latency_ms")
+  tokens         Int?
+  grounded       Boolean?
+  createdAt      DateTime    @default(now()) @map("created_at")
+
+  // Composite FK: a message's tenant MUST match its conversation's tenant.
+  conversation Conversation @relation(fields: [conversationId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@index([tenantId])
+  @@map("message")
+}
+
+model ApiKey {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  assistantId String    @map("assistant_id") @db.Uuid
+  // Globally unique: auth resolves the key BEFORE tenant context is known (the
+  // tenant is derived FROM the key). RLS in #8 must allow this lookup pre-context.
+  keyHash     String    @unique @map("key_hash")
+  lastUsedAt  DateTime? @map("last_used_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  assistant Assistant @relation(fields: [assistantId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  @@index([tenantId, assistantId])
+  @@map("api_key")
+}

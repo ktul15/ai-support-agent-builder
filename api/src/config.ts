@@ -17,7 +17,10 @@ const schema = z.object({
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 
   // Infrastructure (required — fail fast if absent)
+  // Runtime connection (restricted asab_app role; RLS applies).
   DATABASE_URL: z.string().url(),
+  // Owner connection for migrations only (Prisma directUrl). Optional at runtime.
+  DIRECT_DATABASE_URL: z.string().url().optional(),
   REDIS_URL: z.string().url(),
 
   // Auth
@@ -32,12 +35,19 @@ const schema = z.object({
   EMBEDDING_MODEL: z.string().default('text-embedding-3-small'),
   CHAT_MODEL: z.string().default('claude-haiku-4-5'),
 
-  // Object storage (optional until the upload pipeline lands)
+  // Object storage (S3-compatible: MinIO locally, R2/S3 in prod)
   S3_ENDPOINT: z.string().url().optional(),
   S3_REGION: z.string().optional(),
   S3_BUCKET: z.string().optional(),
   S3_ACCESS_KEY_ID: z.string().optional(),
   S3_SECRET_ACCESS_KEY: z.string().optional(),
+
+  // Upload limits. Default 20 MiB — caps memory per request and abuse.
+  UPLOAD_MAX_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(20 * 1024 * 1024),
 });
 
 export type Config = Readonly<z.infer<typeof schema>>;
