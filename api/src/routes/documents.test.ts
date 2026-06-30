@@ -108,3 +108,29 @@ describe('POST /documents (validation)', () => {
     expect(res.status).toBe(413);
   });
 });
+
+describe('GET /documents (validation)', () => {
+  it('401s the list without a token', async () => {
+    expect((await fetch(`${base}/documents?assistantId=${ASSISTANT}`)).status).toBe(401);
+  });
+
+  it('400s the list when assistantId is missing or not a uuid', async () => {
+    const auth = { authorization: `Bearer ${await token()}` };
+    expect((await fetch(`${base}/documents`, { headers: auth })).status).toBe(400);
+    expect((await fetch(`${base}/documents?assistantId=nope`, { headers: auth })).status).toBe(400);
+  });
+
+  it('400s a single document with a non-uuid id', async () => {
+    const res = await fetch(`${base}/documents/not-a-uuid`, {
+      headers: { authorization: `Bearer ${await token()}` },
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('400s the events stream with a non-uuid id', async () => {
+    const res = await fetch(`${base}/documents/not-a-uuid/events`, {
+      headers: { authorization: `Bearer ${await token()}` },
+    });
+    expect(res.status).toBe(400);
+  });
+});

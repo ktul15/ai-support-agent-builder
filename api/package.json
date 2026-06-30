@@ -23,6 +23,7 @@
     "verify:storage": "tsx scripts/verify-storage.ts",
     "verify:upload": "tsx scripts/verify-upload.ts",
     "verify:worker": "tsx scripts/verify-worker.ts",
+    "verify:status": "tsx scripts/verify-status.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {
