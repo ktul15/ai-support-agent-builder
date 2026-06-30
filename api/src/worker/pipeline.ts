@@ -2,7 +2,7 @@ import type { DocumentStatus, SourceType } from '@prisma/client';
 import type { IngestJobData } from '../queue/index.js';
 import type { ObjectStorage } from '../storage/index.js';
 import { parseDocument, ParseError } from '../ingestion/parsing/index.js';
-import { chunkDocument } from '../ingestion/chunking/index.js';
+import { chunkDocument, type ChunkDraft } from '../ingestion/chunking/index.js';
 
 /** Where a document's raw bytes live and how to parse them. */
 export interface DocumentRef {
@@ -28,6 +28,17 @@ export interface DocumentStatusStore {
     tenantId: string,
     result: { pageCount: number; warnings: string[] },
   ): Promise<void>;
+  /**
+   * Persist a document's chunks, deduped on (tenant, assistant, content_hash):
+   * an identical chunk already present (same doc on retry, or shared content) is
+   * skipped, not duplicated or re-embedded. Returns how many were newly inserted.
+   */
+  saveChunks(
+    documentId: string,
+    tenantId: string,
+    assistantId: string,
+    chunks: ChunkDraft[],
+  ): Promise<{ inserted: number; total: number }>;
 }
 
 export interface IngestDeps {
@@ -71,15 +82,22 @@ const parseStage: IngestStage = {
       warnings: parsed.warnings,
     });
 
-    // Structure-aware chunking. #16 (dedup) + #17 (embed) persist + embed these.
+    // Structure-aware chunking, then persist deduped on content_hash. #17 embeds
+    // the rows whose embedding is still NULL.
     const chunks = chunkDocument(parsed);
     // A document with text but no chunkable body (e.g. headings only) has nothing
     // to retrieve — fail it rather than let it reach READY empty.
     if (chunks.length === 0) {
       throw new ParseError('no chunkable content in document');
     }
+    const { inserted, total } = await deps.store.saveChunks(
+      job.documentId,
+      job.tenantId,
+      job.assistantId,
+      chunks,
+    );
     console.log(
-      `document ${job.documentId}: ${parsed.pageCount} page(s), ${chunks.length} chunk(s)`,
+      `document ${job.documentId}: ${parsed.pageCount} page(s), ${total} chunk(s), ${inserted} new`,
     );
   },
 };

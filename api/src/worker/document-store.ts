@@ -1,5 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import type { DocumentStatus } from '@prisma/client';
 import { withTenant } from '../db.js';
+import { hashChunkContent, type ChunkDraft } from '../ingestion/chunking/index.js';
 import type { DocumentRef, DocumentStatusStore } from './pipeline.js';
 
 /**
@@ -55,6 +57,50 @@ export class PrismaDocumentStatusStore implements DocumentStatusStore {
         where: { id: documentId },
         data: { pageCount: result.pageCount, warnings: result.warnings },
       });
+    });
+  }
+
+  saveChunks(
+    documentId: string,
+    tenantId: string,
+    assistantId: string,
+    chunks: ChunkDraft[],
+  ): Promise<{ inserted: number; total: number }> {
+    return withTenant(tenantId, async (tx) => {
+      const data = chunks.map((c) => ({
+        id: randomUUID(),
+        tenantId,
+        documentId,
+        assistantId,
+        content: c.content,
+        tokenCount: c.tokenCount,
+        page: c.page,
+        section: c.section,
+        charStart: c.charStart,
+        charEnd: c.charEnd,
+        contentHash: hashChunkContent(c.content),
+      }));
+
+      // skipDuplicates => ON CONFLICT DO NOTHING. NOTE: Prisma emits no conflict
+      // target, so it swallows conflicts on EVERY unique/PK — fine while the only
+      // ones are the PK (fresh uuids, never collide) and (tenant, assistant,
+      // content_hash). It dedups within the batch AND against rows from prior
+      // runs or other documents, leaving any existing embedding (filled by #17)
+      // untouched. embedding is omitted -> NULL. If another unique is ever added
+      // to chunk, switch to a targeted upsert so new rows aren't silently dropped.
+      //
+      // Batch to stay under Postgres's 65535 bind-parameter cap (11 params/chunk);
+      // all batches share this one transaction, so the write stays atomic.
+      const BATCH_SIZE = 1000;
+      let inserted = 0;
+      for (let i = 0; i < data.length; i += BATCH_SIZE) {
+        const res = await tx.chunk.createMany({
+          data: data.slice(i, i + BATCH_SIZE),
+          skipDuplicates: true,
+        });
+        inserted += res.count;
+      }
+      return { inserted, total: chunks.length };
     });
   }
 }

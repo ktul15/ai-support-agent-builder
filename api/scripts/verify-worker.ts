@@ -132,6 +132,39 @@ async function main() {
     `page_count=${pc[0]?.page_count}`,
   );
 
+  // Chunks were persisted with a real sha256 content_hash and NO embedding yet
+  // (that's #17). A sample hash must be 64 hex chars; embedding count must be 0.
+  const chunkStats = await owner.$queryRaw<
+    { n: number; embedded: number; sample_hash: string | null }[]
+  >`SELECT count(*)::int AS n, count(embedding)::int AS embedded, min(content_hash) AS sample_hash
+    FROM chunk WHERE document_id = ${documentId}::uuid`;
+  const cs = chunkStats[0]!;
+  check(
+    'chunks persisted with a sha256 content_hash, no embedding yet',
+    cs.n >= 1 && cs.embedded === 0 && /^[0-9a-f]{64}$/.test(cs.sample_hash ?? ''),
+    `n=${cs.n} embedded=${cs.embedded} hash=${cs.sample_hash?.slice(0, 12)}…`,
+  );
+
+  // Dedup: re-run parse on the SAME document (force it back to UPLOADED) — the
+  // content_hash unique must skip every chunk, leaving the count unchanged.
+  await owner.$executeRaw`UPDATE document SET status = 'UPLOADED' WHERE id = ${documentId}::uuid`;
+  const dedupJobId = randomUUID();
+  jobIds.push(dedupJobId);
+  await rawQueue.add(
+    'ingest',
+    { documentId, tenantId, assistantId },
+    { jobId: dedupJobId, attempts: 1 },
+  );
+  const reParsed = await waitForStatus(documentId, 'READY'); // must actually re-run, not fail early
+  const afterDedup = await owner.$queryRaw<
+    { n: number }[]
+  >`SELECT count(*)::int AS n FROM chunk WHERE document_id = ${documentId}::uuid`;
+  check(
+    're-parsing the same document inserts no duplicate chunks',
+    reParsed?.status === 'READY' && afterDedup[0]!.n === cs.n,
+    `reparsed=${reParsed?.status} before=${cs.n} after=${afterDedup[0]!.n}`,
+  );
+
   // Idempotency against the REAL Prisma store: re-enqueue the same (now READY)
   // document under a fresh jobId; the worker must process it and leave it READY.
   const reJobId = randomUUID();
