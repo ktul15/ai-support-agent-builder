@@ -17,8 +17,10 @@ import { PrismaClient } from '@prisma/client';
 import { retrieveChunks } from '../src/retrieval/retrieve.js';
 import { createRetrievalService } from '../src/retrieval/retrieval-service.js';
 import { assembleContext } from '../src/chat/prompt-assembly.js';
+import { createGenerationService, collectAnswer } from '../src/chat/generation-service.js';
 import { disconnectDb } from '../src/db.js';
 import { FakeEmbedder } from '../src/providers/fake-embedder.js';
+import { FakeChat } from '../src/providers/fake-chat.js';
 
 config({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../..', '.env') });
 
@@ -161,6 +163,28 @@ async function main() {
       ctx.text.startsWith('[1] "D" — page 1') &&
       ctx.text.includes('[3]'),
     ctx.text.split('\n')[0]?.slice(0, 40),
+  );
+
+  // 7. Full consumer pipeline (#22): retrieve -> assemble -> generate. Uses a
+  //    deterministic FakeChat (no Claude call); proves model selection + usage.
+  const generator = createGenerationService(
+    new FakeChat({
+      reply: 'Refunds are processed within 30 days [1].',
+      usage: { inputTokens: 120, outputTokens: 9 },
+    }),
+  );
+  const answer = await collectAnswer(
+    generator.stream({
+      model: 'claude-haiku-4-5',
+      system: 'Answer only from the sources.',
+      question: target,
+      context: ctx.text,
+    }),
+  );
+  check(
+    'generation streams a grounded answer + captures token usage',
+    answer.text.includes('[1]') && answer.usage?.outputTokens === 9 && answer.error === undefined,
+    `answer="${answer.text.slice(0, 30)}…" out=${answer.usage?.outputTokens}`,
   );
 }
 

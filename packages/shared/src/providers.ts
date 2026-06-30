@@ -34,6 +34,12 @@ export interface ChatRequest {
   /** System prompt — the grounding contract for RAG answers. */
   system?: string;
   messages: ChatMessage[];
+  /**
+   * Override the provider's default model (e.g. per-assistant selection).
+   * Implementations MUST honor this when set, else per-assistant model
+   * selection silently serves the wrong (possibly wrong-cost) model.
+   */
+  model?: string;
   maxTokens?: number;
   temperature?: number;
   /** Cancels the upstream call when the client disconnects (stops token billing). */
