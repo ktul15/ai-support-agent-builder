@@ -15,6 +15,7 @@ import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { retrieveChunks } from '../src/retrieval/retrieve.js';
+import { createRetrievalService } from '../src/retrieval/retrieval-service.js';
 import { disconnectDb } from '../src/db.js';
 import { FakeEmbedder } from '../src/providers/fake-embedder.js';
 
@@ -135,6 +136,16 @@ async function main() {
       .find((l) => l.includes('chunk_embedding_hnsw'))
       ?.trim()
       .slice(0, 50) ?? planText.split('\n')[1]?.trim().slice(0, 50),
+  );
+
+  // 5. Retrieval service (#20): embeds the question (same embedder/model as the
+  //    corpus) and returns ranked chunks; k is configurable.
+  const service = createRetrievalService(embedder);
+  const serviceHits = await service.retrieve(tenantA, { assistantId: a1, question: target, k: 3 });
+  check(
+    'retrieval service embeds the question and returns k ranked chunks',
+    serviceHits.length === 3 && serviceHits[0]?.content === target,
+    serviceHits[0] ? `top="${serviceHits[0].content}" k=${serviceHits.length}` : 'no hits',
   );
 }
 
