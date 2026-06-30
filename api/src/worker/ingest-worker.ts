@@ -1,5 +1,6 @@
 import { Worker } from 'bullmq';
 import { Redis } from 'ioredis';
+import type { Embedder } from '@asab/shared';
 import { INGEST_QUEUE_NAME, type IngestJobData } from '../queue/index.js';
 import type { ObjectStorage } from '../storage/index.js';
 import { runIngestion, type DocumentStatusStore } from './pipeline.js';
@@ -10,6 +11,7 @@ export interface IngestWorkerDeps {
   redisUrl: string;
   store: DocumentStatusStore;
   storage: ObjectStorage;
+  embedder: Embedder;
   concurrency?: number;
 }
 
@@ -28,7 +30,12 @@ export function createIngestWorker(deps: IngestWorkerDeps): IngestWorkerHandle {
 
   const worker = new Worker<IngestJobData>(
     INGEST_QUEUE_NAME,
-    (job) => runIngestion(job.data, { store: deps.store, storage: deps.storage }),
+    (job) =>
+      runIngestion(job.data, {
+        store: deps.store,
+        storage: deps.storage,
+        embedder: deps.embedder,
+      }),
     { connection, concurrency: deps.concurrency ?? 4 },
   );
 

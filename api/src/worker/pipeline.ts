@@ -1,8 +1,27 @@
 import type { DocumentStatus, SourceType } from '@prisma/client';
+import type { Embedder } from '@asab/shared';
 import type { IngestJobData } from '../queue/index.js';
 import type { ObjectStorage } from '../storage/index.js';
 import { parseDocument, ParseError } from '../ingestion/parsing/index.js';
 import { chunkDocument, type ChunkDraft } from '../ingestion/chunking/index.js';
+import { EMBEDDING_DIMENSIONS } from '../providers/index.js';
+import { withRetry } from '../util/retry.js';
+
+// Embed in batches so a transient failure re-does only one batch (not the whole
+// document) and persisted batches survive a resume. The Embedder also batches
+// internally; this is the retry/persist granularity.
+const EMBED_BATCH_SIZE = 128;
+
+/**
+ * Retry transient provider failures (429 / 5xx / network) but fail fast on
+ * permanent ones (4xx auth/validation) — re-embedding can't fix a bad key or an
+ * invalid request, and would waste spend.
+ */
+function isRetryableEmbedError(err: unknown): boolean {
+  const status = (err as { status?: number })?.status;
+  if (status === undefined) return true; // network/unknown — worth a retry
+  return status === 429 || status >= 500;
+}
 
 /** Where a document's raw bytes live and how to parse them. */
 export interface DocumentRef {
@@ -39,11 +58,19 @@ export interface DocumentStatusStore {
     assistantId: string,
     chunks: ChunkDraft[],
   ): Promise<{ inserted: number; total: number }>;
+  /** Chunks of a document still needing an embedding (embedding IS NULL). */
+  getUnembeddedChunks(
+    documentId: string,
+    tenantId: string,
+  ): Promise<{ id: string; content: string }[]>;
+  /** Write embedding vectors onto the given chunks (raw SQL — Unsupported column). */
+  setChunkEmbeddings(tenantId: string, updates: { id: string; vector: number[] }[]): Promise<void>;
 }
 
 export interface IngestDeps {
   store: DocumentStatusStore;
   storage: ObjectStorage;
+  embedder: Embedder;
 }
 
 export interface IngestStage {
@@ -105,9 +132,42 @@ const parseStage: IngestStage = {
 const embedStage: IngestStage = {
   name: 'embed',
   startStatus: 'EMBEDDING',
-  run() {
-    // #16 (dedup) + #17 (embedding) land here. Skeleton no-op.
-    return Promise.resolve();
+  async run(job, deps) {
+    if (deps.embedder.dimensions !== EMBEDDING_DIMENSIONS) {
+      throw new Error(
+        `embedder dimensions ${deps.embedder.dimensions} != column width ${EMBEDDING_DIMENSIONS}`,
+      );
+    }
+    // Only embed chunks that don't have a vector yet — so a retry/resume embeds
+    // just the remainder, and re-running a fully-embedded doc is a no-op.
+    const pending = await deps.store.getUnembeddedChunks(job.documentId, job.tenantId);
+    if (pending.length === 0) return;
+
+    for (let i = 0; i < pending.length; i += EMBED_BATCH_SIZE) {
+      const batch = pending.slice(i, i + EMBED_BATCH_SIZE);
+      const vectors = await withRetry(() => deps.embedder.embed(batch.map((c) => c.content)), {
+        attempts: 4,
+        baseDelayMs: 500,
+        shouldRetry: isRetryableEmbedError,
+      });
+      if (vectors.length !== batch.length) {
+        throw new Error(`embedder returned ${vectors.length} vectors for ${batch.length} chunks`);
+      }
+
+      const updates = batch.map((chunk, j) => {
+        const vector = vectors[j]!;
+        if (vector.length !== EMBEDDING_DIMENSIONS) {
+          throw new Error(`embedding has ${vector.length} dims, expected ${EMBEDDING_DIMENSIONS}`);
+        }
+        if (!vector.every((v) => Number.isFinite(v))) {
+          throw new Error('embedding contains a non-finite value');
+        }
+        return { id: chunk.id, vector };
+      });
+      // Persist each batch as it completes, so a later failure resumes from the
+      // remainder instead of re-embedding everything.
+      await deps.store.setChunkEmbeddings(job.tenantId, updates);
+    }
   },
 };
 

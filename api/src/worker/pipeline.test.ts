@@ -7,6 +7,7 @@ import {
   type IngestDeps,
 } from './pipeline.js';
 import { MemoryStorage } from '../storage/memory-storage.js';
+import { FakeEmbedder } from '../providers/fake-embedder.js';
 
 // Real uuids so the default parse stage's tenantObjectKey() validation passes
 // and the storage existence check is what actually fails.
@@ -49,6 +50,16 @@ class FakeStore implements DocumentStatusStore {
   ): Promise<{ inserted: number; total: number }> {
     return Promise.resolve({ inserted: chunks.length, total: chunks.length });
   }
+  pending: { id: string; content: string }[] = [];
+  embedded: { id: string; vector: number[] }[] = [];
+  getUnembeddedChunks(): Promise<{ id: string; content: string }[]> {
+    return Promise.resolve(this.pending);
+  }
+  setChunkEmbeddings(_t: string, updates: { id: string; vector: number[] }[]): Promise<void> {
+    this.embedded.push(...updates);
+    this.pending = this.pending.filter((p) => !updates.some((u) => u.id === p.id));
+    return Promise.resolve();
+  }
 }
 
 // Two spy stages mirroring the real shape (PARSING then EMBEDDING).
@@ -74,8 +85,8 @@ function spyStages(ran: string[], failOn?: string): IngestStage[] {
   ];
 }
 
-function deps(store: DocumentStatusStore): IngestDeps {
-  return { store, storage: new MemoryStorage() };
+function deps(store: DocumentStatusStore, embedder = new FakeEmbedder()): IngestDeps {
+  return { store, storage: new MemoryStorage(), embedder };
 }
 
 describe('runIngestion', () => {
@@ -138,7 +149,58 @@ describe('runIngestion', () => {
     const storage = new MemoryStorage();
     // FakeStore.getRef reports a TXT object; store whitespace-only content there.
     await storage.put({ key: 'some-key', body: Buffer.from('   \n  '), contentType: 'text/plain' });
-    await expect(runIngestion(JOB, { store, storage })).rejects.toThrow('no extractable text');
+    await expect(
+      runIngestion(JOB, { store, storage, embedder: new FakeEmbedder() }),
+    ).rejects.toThrow('no extractable text');
     expect(store.history).toEqual(['PARSING']);
+  });
+
+  // Start at EMBEDDING so the default parse stage is skipped and the real embed
+  // stage runs against the FakeStore's pending chunks.
+  it('embed stage embeds pending chunks and writes 1536-dim vectors', async () => {
+    const store = new FakeStore('EMBEDDING');
+    store.pending = [
+      { id: 'c1', content: 'first chunk' },
+      { id: 'c2', content: 'second chunk' },
+    ];
+    await runIngestion(JOB, deps(store));
+    expect(store.embedded.map((e) => e.id)).toEqual(['c1', 'c2']);
+    expect(store.embedded[0]!.vector.length).toBe(1536);
+    expect(store.history).toEqual(['READY']);
+  });
+
+  it('embed stage is a no-op when nothing is pending', async () => {
+    const store = new FakeStore('EMBEDDING'); // pending defaults to []
+    await runIngestion(JOB, deps(store));
+    expect(store.embedded).toEqual([]);
+    expect(store.history).toEqual(['READY']);
+  });
+
+  it('embed stage fails on an embedder dimension mismatch', async () => {
+    const store = new FakeStore('EMBEDDING');
+    store.pending = [{ id: 'c1', content: 'x' }];
+    await expect(runIngestion(JOB, deps(store, new FakeEmbedder(10)))).rejects.toThrow(
+      'dimensions',
+    );
+    expect(store.embedded).toEqual([]);
+  });
+
+  it('embed stage rejects a non-finite embedding value', async () => {
+    const store = new FakeStore('EMBEDDING');
+    store.pending = [{ id: 'c1', content: 'x' }];
+    const nanEmbedder = {
+      model: 'nan',
+      dimensions: 1536,
+      embed: (texts: string[]): Promise<number[][]> =>
+        Promise.resolve(
+          texts.map(() => {
+            const v = new Array<number>(1536).fill(0.1);
+            v[0] = NaN;
+            return v;
+          }),
+        ),
+    };
+    await expect(runIngestion(JOB, deps(store, nanEmbedder))).rejects.toThrow('non-finite');
+    expect(store.embedded).toEqual([]);
   });
 });
