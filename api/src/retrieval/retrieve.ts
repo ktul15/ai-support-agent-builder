@@ -15,8 +15,13 @@ export interface ChunkHit {
   id: string;
   content: string;
   documentId: string;
+  /** Owning document's title (for citations/prompt source headers). */
+  title: string;
   page: number | null;
   section: string | null;
+  /** Char offsets into the document text — the tappable citation anchor (#24). */
+  charStart: number | null;
+  charEnd: number | null;
   /** Cosine similarity in [-1, 1] (1 = identical). */
   score: number;
 }
@@ -71,17 +76,21 @@ export async function retrieveChunks(
     await tx.$executeRaw`SELECT set_config('hnsw.ef_search', ${String(HNSW_EF_SEARCH)}, true)`;
     await tx.$executeRaw`SELECT set_config('hnsw.max_scan_tuples', ${String(HNSW_MAX_SCAN_TUPLES)}, true)`;
     return tx.$queryRaw<ChunkHit[]>`
-      SELECT id,
-             content,
-             document_id AS "documentId",
-             page,
-             section,
-             1 - (embedding <=> ${vector}::vector) AS score
-      FROM chunk
-      WHERE tenant_id = ${tenantId}::uuid
-        AND assistant_id = ${params.assistantId}::uuid
-        AND embedding IS NOT NULL
-      ORDER BY embedding <=> ${vector}::vector
+      SELECT c.id,
+             c.content,
+             c.document_id AS "documentId",
+             d.title,
+             c.page,
+             c.section,
+             c.char_start AS "charStart",
+             c.char_end AS "charEnd",
+             1 - (c.embedding <=> ${vector}::vector) AS score
+      FROM chunk c
+      JOIN document d ON d.id = c.document_id
+      WHERE c.tenant_id = ${tenantId}::uuid
+        AND c.assistant_id = ${params.assistantId}::uuid
+        AND c.embedding IS NOT NULL
+      ORDER BY c.embedding <=> ${vector}::vector
       LIMIT ${k}`;
   });
 }
