@@ -7,6 +7,7 @@ import type { RetrievalService } from '../retrieval/retrieval-service.js';
 import type { GenerationService } from '../chat/generation-service.js';
 import { assembleContext, type AssembledSource } from '../chat/prompt-assembly.js';
 import { DEFAULT_GROUNDING_PROMPT } from '../chat/grounding.js';
+import { evaluateThreshold, REFUSAL_MESSAGE } from '../chat/refusal.js';
 
 export interface ChatDeps {
   retrieval: RetrievalService;
@@ -50,18 +51,19 @@ const sse = (event: string, data: unknown): string =>
   `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 
 /**
- * SSE chat endpoint (invariant #5): retrieve -> assemble -> generate, streamed
- * token-by-token over text/event-stream. The final `done` event carries
- * citations + grounded + latency_ms. Client disconnect aborts the upstream
- * Claude call (stops token billing); a heartbeat keeps the connection alive.
+ * SSE chat endpoint (invariant #5): retrieve -> threshold gate -> assemble ->
+ * generate, streamed token-by-token over text/event-stream. The final `done`
+ * event carries citations + grounded + latency_ms. Client disconnect aborts the
+ * upstream Claude call (stops token billing); a heartbeat keeps it alive.
  *
  * `Cache-Control: no-transform` defends the stream against a proxy/middleware
  * re-compressing it. No compression middleware is mounted yet — when one is
  * added globally it MUST skip this route, or buffering defeats streaming.
  *
- * Boundaries: the refusal threshold gate is #25; the grounding contract +
- * exact refusal string is #26; the precise citations payload is #24. Here
- * `grounded` is a placeholder (had-sources) until #25/#26 land.
+ * The pre-LLM refusal threshold gate (#25, invariant #3 gate 1) is wired below.
+ * Still pending: the in-prompt grounding contract (#26, reuses REFUSAL_MESSAGE)
+ * and the precise citations payload (#24, narrows to only the markers cited).
+ * Until #26, `grounded` on the success path is a placeholder (had-sources).
  */
 export function chatRouter(deps: ChatDeps, tenantContext: RequestHandler): Router {
   const r = Router();
@@ -110,7 +112,7 @@ export function chatRouter(deps: ChatDeps, tenantContext: RequestHandler): Route
         const assistant = await withTenant(tenant.tenantId, (tx) =>
           tx.assistant.findUnique({
             where: { id: assistantId },
-            select: { id: true, model: true, systemPrompt: true },
+            select: { id: true, model: true, systemPrompt: true, refusalThreshold: true },
           }),
         );
         if (closed) return; // client disconnected during the load
@@ -136,6 +138,27 @@ export function chatRouter(deps: ChatDeps, tenantContext: RequestHandler): Route
 
         const hits = await deps.retrieval.retrieve(tenant.tenantId, { assistantId, question });
         if (closed) return;
+
+        // Pre-LLM gate (#25, invariant #3): if nothing clears the assistant's
+        // refusal threshold, refuse WITHOUT spending an LLM call.
+        const gate = evaluateThreshold(hits, assistant.refusalThreshold);
+        if (gate.refuse) {
+          console.info(
+            `chat refusal: assistant=${assistant.id} reason=${gate.reason} ` +
+              `top_score=${gate.topScore ?? 'none'} threshold=${assistant.refusalThreshold}`,
+          );
+          safeWrite(sse('token', { text: REFUSAL_MESSAGE }));
+          safeWrite(
+            sse('done', {
+              grounded: false,
+              citations: [],
+              latency_ms: Math.round(performance.now() - t0),
+            }),
+          );
+          end();
+          return;
+        }
+
         const ctx = assembleContext(hits);
 
         for await (const event of deps.generation.stream({
