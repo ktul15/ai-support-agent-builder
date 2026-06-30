@@ -41,6 +41,14 @@ class FakeStore implements DocumentStatusStore {
   setParseResult(): Promise<void> {
     return Promise.resolve();
   }
+  saveChunks(
+    _d: string,
+    _t: string,
+    _a: string,
+    chunks: unknown[],
+  ): Promise<{ inserted: number; total: number }> {
+    return Promise.resolve({ inserted: chunks.length, total: chunks.length });
+  }
 }
 
 // Two spy stages mirroring the real shape (PARSING then EMBEDDING).
