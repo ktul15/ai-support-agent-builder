@@ -1,4 +1,5 @@
 import type { Chat, ChatRequest, ChatStopReason, ChatStreamEvent, ChatUsage } from '@asab/shared';
+import { modelSupportsSamplingParams } from './chat-models.js';
 
 /** Minimal slice of the Anthropic streaming event shape we read. */
 export interface AnthropicStreamEvent {
@@ -44,13 +45,17 @@ export class ClaudeChat implements Chat {
     let stopReason: ChatStopReason | undefined;
 
     try {
+      // Per-request override (per-assistant model) falls back to the default.
+      const model = req.model ?? this.model;
       const stream = await this.client.messages.create(
         {
-          model: this.model,
+          model,
           max_tokens: req.maxTokens ?? DEFAULT_MAX_TOKENS,
           system: req.system,
           messages: req.messages,
-          temperature: req.temperature,
+          // Opus 4.7/4.8 and Fable 5 REJECT temperature with a 400 — only send it
+          // to models that accept sampling params (steer the rest via prompt).
+          ...(modelSupportsSamplingParams(model) ? { temperature: req.temperature } : {}),
           stream: true,
         },
         req.signal ? { signal: req.signal } : undefined,
