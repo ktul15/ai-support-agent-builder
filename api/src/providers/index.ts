@@ -18,6 +18,9 @@ export interface Providers {
 // corpus must be re-embedded (vector width is fixed). Single source of truth.
 export const EMBEDDING_DIMENSIONS = 1536;
 
+// Re-export for back-compat; the implementation lives in a SDK-free leaf module.
+export { isRetryableEmbedError } from './embed-errors.js';
+
 /**
  * Build the concrete providers selected by config. The single place vendor SDKs
  * are constructed — everything downstream depends only on the @asab/shared

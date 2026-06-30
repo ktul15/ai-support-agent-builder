@@ -4,24 +4,13 @@ import type { IngestJobData } from '../queue/index.js';
 import type { ObjectStorage } from '../storage/index.js';
 import { parseDocument, ParseError } from '../ingestion/parsing/index.js';
 import { chunkDocument, type ChunkDraft } from '../ingestion/chunking/index.js';
-import { EMBEDDING_DIMENSIONS } from '../providers/index.js';
+import { EMBEDDING_DIMENSIONS, isRetryableEmbedError } from '../providers/index.js';
 import { withRetry } from '../util/retry.js';
 
 // Embed in batches so a transient failure re-does only one batch (not the whole
 // document) and persisted batches survive a resume. The Embedder also batches
 // internally; this is the retry/persist granularity.
 const EMBED_BATCH_SIZE = 128;
-
-/**
- * Retry transient provider failures (429 / 5xx / network) but fail fast on
- * permanent ones (4xx auth/validation) — re-embedding can't fix a bad key or an
- * invalid request, and would waste spend.
- */
-function isRetryableEmbedError(err: unknown): boolean {
-  const status = (err as { status?: number })?.status;
-  if (status === undefined) return true; // network/unknown — worth a retry
-  return status === 429 || status >= 500;
-}
 
 /** Where a document's raw bytes live and how to parse them. */
 export interface DocumentRef {
