@@ -25,7 +25,8 @@
     "verify:worker": "tsx scripts/verify-worker.ts",
     "verify:status": "tsx scripts/verify-status.ts",
     "postinstall": "prisma generate",
-    "verify:retrieval": "tsx scripts/verify-retrieval.ts"
+    "verify:retrieval": "tsx scripts/verify-retrieval.ts",
+    "verify:chat": "tsx scripts/verify-chat.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.3",
