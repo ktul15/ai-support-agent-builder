@@ -23,6 +23,7 @@ import { createRetrievalService } from '../src/retrieval/retrieval-service.js';
 import { createGenerationService } from '../src/chat/generation-service.js';
 import { FakeEmbedder } from '../src/providers/fake-embedder.js';
 import { FakeChat } from '../src/providers/fake-chat.js';
+import { REFUSAL_MESSAGE } from '../src/chat/refusal.js';
 import { disconnectDb } from '../src/db.js';
 
 config({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../..', '.env') });
@@ -68,11 +69,13 @@ async function readSse(
 async function main() {
   const tenantId = randomUUID();
   const assistantId = randomUUID();
+  const emptyAssistantId = randomUUID(); // no chunks -> threshold gate refuses
   const documentId = randomUUID();
   tenants.push(tenantId);
 
   await owner.$executeRaw`INSERT INTO tenant (id,name) VALUES (${tenantId}::uuid, 'T')`;
   await owner.$executeRaw`INSERT INTO assistant (id,tenant_id,name,updated_at) VALUES (${assistantId}::uuid, ${tenantId}::uuid, 'A', now())`;
+  await owner.$executeRaw`INSERT INTO assistant (id,tenant_id,name,updated_at) VALUES (${emptyAssistantId}::uuid, ${tenantId}::uuid, 'Empty', now())`;
   await owner.$executeRaw`INSERT INTO document (id,tenant_id,assistant_id,title,source_type,storage_key,status,updated_at)
     VALUES (${documentId}::uuid, ${tenantId}::uuid, ${assistantId}::uuid, 'Refund Policy', 'TXT', 'k', 'READY', now())`;
 
@@ -165,7 +168,34 @@ async function main() {
       'first frame received',
     );
 
-    // 3. 404 for an unknown assistant (pre-stream HTTP error, not an SSE frame).
+    // 3. Threshold gate (#25): an empty-corpus assistant returns no hits, so the
+    //    pre-LLM gate refuses — the answer is the canonical refusal string (NOT
+    //    the FakeChat reply, proving the LLM was skipped) and grounded is false.
+    const refuseRes = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: auth },
+      body: JSON.stringify({
+        assistantId: emptyAssistantId,
+        question: 'how long do refunds take?',
+      }),
+    });
+    const refuseEvents = await readSse(refuseRes.body!);
+    const refuseAnswer = refuseEvents
+      .filter((e) => e.event === 'token')
+      .map((t) => JSON.parse(t.data).text)
+      .join('');
+    const refuseDone = refuseEvents.find((e) => e.event === 'done');
+    const rdone = refuseDone ? JSON.parse(refuseDone.data) : undefined;
+    check(
+      'off-corpus question refuses pre-LLM (refusal string, grounded=false, no citations)',
+      refuseAnswer === REFUSAL_MESSAGE &&
+        rdone?.grounded === false &&
+        Array.isArray(rdone.citations) &&
+        rdone.citations.length === 0,
+      `answer="${refuseAnswer.slice(0, 30)}…" grounded=${rdone?.grounded}`,
+    );
+
+    // 4. 404 for an unknown assistant (pre-stream HTTP error, not an SSE frame).
     const notFound = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: auth },
