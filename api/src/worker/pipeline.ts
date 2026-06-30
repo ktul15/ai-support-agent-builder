@@ -2,6 +2,7 @@ import type { DocumentStatus, SourceType } from '@prisma/client';
 import type { IngestJobData } from '../queue/index.js';
 import type { ObjectStorage } from '../storage/index.js';
 import { parseDocument, ParseError } from '../ingestion/parsing/index.js';
+import { chunkDocument } from '../ingestion/chunking/index.js';
 
 /** Where a document's raw bytes live and how to parse them. */
 export interface DocumentRef {
@@ -69,7 +70,17 @@ const parseStage: IngestStage = {
       pageCount: parsed.pageCount,
       warnings: parsed.warnings,
     });
-    // #15 (chunk) consumes `parsed` here.
+
+    // Structure-aware chunking. #16 (dedup) + #17 (embed) persist + embed these.
+    const chunks = chunkDocument(parsed);
+    // A document with text but no chunkable body (e.g. headings only) has nothing
+    // to retrieve — fail it rather than let it reach READY empty.
+    if (chunks.length === 0) {
+      throw new ParseError('no chunkable content in document');
+    }
+    console.log(
+      `document ${job.documentId}: ${parsed.pageCount} page(s), ${chunks.length} chunk(s)`,
+    );
   },
 };
 

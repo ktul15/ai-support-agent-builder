@@ -5,3 +5,5 @@
 admin/**
 mobile/**
 package-lock.json
+# Test fixtures are byte-stable inputs for parsers/chunking — never reformat.
+**/test/fixtures/**
