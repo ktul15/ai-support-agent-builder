@@ -55,6 +55,16 @@ class FakeStore implements DocumentStatusStore {
   getUnembeddedChunks(): Promise<{ id: string; content: string }[]> {
     return Promise.resolve(this.pending);
   }
+  embeddingModel: string | null = null;
+  ensureEmbeddingModel(_t: string, _a: string, model: string): Promise<void> {
+    if (this.embeddingModel === null) this.embeddingModel = model;
+    else if (this.embeddingModel !== model) {
+      return Promise.reject(
+        new Error(`ensureEmbeddingModel: mismatch ${this.embeddingModel} vs ${model}`),
+      );
+    }
+    return Promise.resolve();
+  }
   embedBatches = 0;
   setChunkEmbeddings(
     _t: string,
@@ -197,6 +207,14 @@ describe('runIngestion', () => {
       'dimensions',
     );
     expect(store.embedded).toEqual([]);
+  });
+
+  it('embed stage refuses to mix embedding models on one corpus (invariant #4)', async () => {
+    const store = new FakeStore('EMBEDDING');
+    store.pending = [{ id: 'c1', content: 'x' }];
+    store.embeddingModel = 'a-different-model'; // corpus already claimed by another model
+    await expect(runIngestion(JOB, deps(store))).rejects.toThrow('mismatch');
+    expect(store.embedded).toEqual([]); // nothing embedded — failed before spending calls
   });
 
   it('embed stage rejects a non-finite embedding value', async () => {

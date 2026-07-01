@@ -47,6 +47,12 @@ export interface DocumentStatusStore {
     assistantId: string,
     chunks: ChunkDraft[],
   ): Promise<{ inserted: number; total: number }>;
+  /**
+   * Claim the assistant's embedding model on first ingest (invariant #4). Sets
+   * assistant.embedding_model if unset; throws if it's already set to a
+   * different model — the corpus can't mix vector spaces. Idempotent when equal.
+   */
+  ensureEmbeddingModel(tenantId: string, assistantId: string, model: string): Promise<void>;
   /** Chunks of a document still needing an embedding (embedding IS NULL). */
   getUnembeddedChunks(
     documentId: string,
@@ -139,6 +145,10 @@ const embedStage: IngestStage = {
     // just the remainder, and re-running a fully-embedded doc is a no-op.
     const pending = await deps.store.getUnembeddedChunks(job.documentId, job.tenantId);
     if (pending.length === 0) return;
+
+    // Claim/verify the corpus embedding model BEFORE spending embed calls, so a
+    // model change without re-embedding fails this document loudly (invariant #4).
+    await deps.store.ensureEmbeddingModel(job.tenantId, job.assistantId, deps.embedder.model);
 
     for (let i = 0; i < pending.length; i += EMBED_BATCH_SIZE) {
       const batch = pending.slice(i, i + EMBED_BATCH_SIZE);

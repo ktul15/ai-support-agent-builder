@@ -47,6 +47,7 @@ export function createRetrievalService(embedder: Embedder): RetrievalService {
       return retrieveChunks(tenantId, {
         assistantId: query.assistantId,
         queryEmbedding: embedding,
+        embeddingModel: embedder.model,
         k: query.k ?? DEFAULT_RETRIEVAL_K,
       });
     },

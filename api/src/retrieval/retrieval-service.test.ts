@@ -39,6 +39,9 @@ describe('createRetrievalService', () => {
     expect(params.assistantId).toBe(ASSISTANT);
     expect(params.k).toBe(DEFAULT_RETRIEVAL_K);
     expect(params.queryEmbedding).toHaveLength(1536); // embedded by the injected embedder
+    // Passes the embedder's model so retrieveChunks can assert corpus == query
+    // model (invariant #4).
+    expect(params.embeddingModel).toBe('fake-embedder');
   });
 
   it('rejects an over-long question before embedding', async () => {
