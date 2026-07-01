@@ -5,14 +5,25 @@ import { withTenant } from '../db.js';
 import { requireTenant } from '../middleware/tenant-context.js';
 import type { RetrievalService } from '../retrieval/retrieval-service.js';
 import type { GenerationService } from '../chat/generation-service.js';
-import { assembleContext } from '../chat/prompt-assembly.js';
+import { assembleContext, DEFAULT_ASSEMBLE_OPTIONS } from '../chat/prompt-assembly.js';
 import { buildGroundingSystem } from '../chat/grounding.js';
 import { evaluateThreshold, REFUSAL_MESSAGE } from '../chat/refusal.js';
 import { buildCitations } from '../chat/citations.js';
+import { rateLimit } from '../middleware/rate-limit.js';
+import type { RateLimiter } from '../ratelimit/index.js';
+
+export interface ChatLimits {
+  /** Token budget for the assembled sources block (#28; cl100k-approx). */
+  contextTokenBudget: number;
+  /** Hard cap on generated answer tokens (cost ceiling). */
+  maxOutputTokens: number;
+}
 
 export interface ChatDeps {
   retrieval: RetrievalService;
   generation: GenerationService;
+  rateLimiter: RateLimiter;
+  limits: ChatLimits;
 }
 
 const bodySchema = z.object({
@@ -37,15 +48,15 @@ const sse = (event: string, data: unknown): string =>
  * added globally it MUST skip this route, or buffering defeats streaming.
  *
  * Both refusal gates (invariant #3) are wired: the pre-LLM threshold gate (#25)
- * and the in-prompt grounding contract (#26, buildGroundingSystem). `grounded`
- * is true only when the model produced a real answer (not the refusal string)
- * over a non-empty source set. Still pending: the precise citations payload
- * (#24, narrows to only the markers the answer actually cited).
+ * and the in-prompt grounding contract (#26). `grounded` is true only when the
+ * answer cited >=1 source (#24). Cost/abuse controls (#28): a per-tenant Redis
+ * token bucket (429 on exceed), a per-request context token budget, a hard
+ * output-token cap, and SSE backpressure (await drain).
  */
 export function chatRouter(deps: ChatDeps, tenantContext: RequestHandler): Router {
   const r = Router();
 
-  r.post('/chat', tenantContext, (req, res) => {
+  r.post('/chat', tenantContext, rateLimit(deps.rateLimiter, 'chat'), (req, res) => {
     const tenant = requireTenant(req);
     const parsed = bodySchema.safeParse(req.body);
     if (!parsed.success) {
@@ -59,9 +70,33 @@ export function chatRouter(deps: ChatDeps, tenantContext: RequestHandler): Route
       let heartbeat: ReturnType<typeof setInterval> | undefined;
       let maxTimer: ReturnType<typeof setTimeout> | undefined;
       const controller = new AbortController();
-      const safeWrite = (chunk: string): void => {
-        if (!closed && !res.writableEnded) res.write(chunk);
+      const safeWrite = (chunk: string): boolean => {
+        if (closed || res.writableEnded) return true;
+        return res.write(chunk);
       };
+      // Backpressure (#28): if the socket buffer is full, wait for it to flush
+      // before writing more — bounds in-flight memory for a slow reader instead
+      // of buffering the whole answer. Also resolve on disconnect/abort so a
+      // wedged socket (reader stalls but holds the connection) can't hang the
+      // coroutine past the abort/timeout — the timeout path destroys it too.
+      const drain = (): Promise<void> =>
+        new Promise((resolve) => {
+          const done = (): void => {
+            res.off('drain', done);
+            res.off('close', done);
+            req.off('close', done);
+            controller.signal.removeEventListener('abort', done);
+            resolve();
+          };
+          if (controller.signal.aborted) {
+            done();
+            return;
+          }
+          res.once('drain', done);
+          res.once('close', done);
+          req.once('close', done);
+          controller.signal.addEventListener('abort', done, { once: true });
+        });
       const end = (): void => {
         if (closed) return;
         closed = true;
@@ -111,6 +146,9 @@ export function chatRouter(deps: ChatDeps, tenantContext: RequestHandler): Route
           safeWrite(sse('error', { message: 'timeout' }));
           controller.abort();
           end();
+          // A graceful res.end() can't flush a buffer stuck behind a dead
+          // reader — destroy the socket so it actually tears down.
+          res.socket?.destroy();
         }, MAX_STREAM_MS);
 
         const hits = await deps.retrieval.retrieve(tenant.tenantId, { assistantId, question });
@@ -136,7 +174,12 @@ export function chatRouter(deps: ChatDeps, tenantContext: RequestHandler): Route
           return;
         }
 
-        const ctx = assembleContext(hits);
+        // Enforce the per-request context token budget (#28) — trims the sources
+        // block so the prompt sent to Claude stays within a bounded size.
+        const ctx = assembleContext(hits, {
+          maxSources: DEFAULT_ASSEMBLE_OPTIONS.maxSources,
+          tokenBudget: deps.limits.contextTokenBudget,
+        });
 
         // Accumulate the answer so we can tell an in-prompt refusal (gate 2, #26)
         // from a grounded answer — the contract makes the model emit EXACTLY the
@@ -147,12 +190,16 @@ export function chatRouter(deps: ChatDeps, tenantContext: RequestHandler): Route
           system: buildGroundingSystem(assistant.systemPrompt),
           question,
           context: ctx.text,
+          maxTokens: deps.limits.maxOutputTokens,
           signal: controller.signal,
         })) {
           if (closed) break;
           if (event.type === 'text') {
             answer += event.text;
-            safeWrite(sse('token', { text: event.text }));
+            if (!safeWrite(sse('token', { text: event.text }))) {
+              await drain();
+              if (closed) break;
+            }
           } else if (event.type === 'error') {
             safeWrite(sse('error', { message: 'generation failed', retryable: event.retryable }));
             end();
