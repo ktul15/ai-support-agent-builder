@@ -12,6 +12,14 @@ export function countTokens(text: string): number {
   return enc().encode(text).length;
 }
 
+/** The first `n` tokens of `text`, decoded back to a string (budget trimming). */
+export function truncateToTokens(text: string, n: number): string {
+  if (n <= 0) return '';
+  const tokens = enc().encode(text);
+  if (tokens.length <= n) return text;
+  return enc().decode(tokens.slice(0, n)).replace(/�+$/, ''); // drop a trailing partial char from the cut
+}
+
 /** The last `n` tokens of `text`, decoded back to a string (for chunk overlap). */
 export function takeLastTokens(text: string, n: number): string {
   if (n <= 0) return '';

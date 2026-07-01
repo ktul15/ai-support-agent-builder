@@ -48,6 +48,20 @@ const schema = z.object({
     .int()
     .positive()
     .default(20 * 1024 * 1024),
+
+  // Chat rate limiting (per-tenant Redis token bucket) + per-request budgets.
+  // Capacity = burst; refill/sec = sustained rate. Default: 30 burst, 0.5/s
+  // sustained (~30 requests/minute).
+  CHAT_RATE_CAPACITY: z.coerce.number().int().positive().default(30),
+  CHAT_RATE_REFILL_PER_SEC: z.coerce.number().positive().default(0.5),
+  // Token budget for the assembled sources block. NOTE: counted with cl100k
+  // (the embed tokenizer), which is an approximation of Claude's count — keep
+  // this conservative so the real Claude prompt stays well within context.
+  CHAT_CONTEXT_TOKEN_BUDGET: z.coerce.number().int().positive().default(2000),
+  // Hard cap on generated answer tokens (cost ceiling per request). 2048 so a
+  // multi-source cited answer isn't truncated mid-citation (the roomier RAG
+  // default from #22); lower it to trade completeness for cost.
+  CHAT_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().default(2048),
 });
 
 export type Config = Readonly<z.infer<typeof schema>>;

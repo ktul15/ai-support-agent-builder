@@ -104,6 +104,26 @@ export class PrismaDocumentStatusStore implements DocumentStatusStore {
     });
   }
 
+  ensureEmbeddingModel(tenantId: string, assistantId: string, model: string): Promise<void> {
+    return withTenant(tenantId, async (tx) => {
+      // Claim the model on first ingest (no-op if already set to anything).
+      await tx.assistant.updateMany({
+        where: { id: assistantId, embeddingModel: null },
+        data: { embeddingModel: model },
+      });
+      const assistant = await tx.assistant.findUnique({
+        where: { id: assistantId },
+        select: { embeddingModel: true },
+      });
+      if (assistant && assistant.embeddingModel !== model) {
+        throw new Error(
+          `ensureEmbeddingModel: corpus already embedded with "${assistant.embeddingModel}", ` +
+            `refusing to mix in "${model}". Re-embed the whole corpus to change models.`,
+        );
+      }
+    });
+  }
+
   getUnembeddedChunks(
     documentId: string,
     tenantId: string,

@@ -47,8 +47,13 @@ describe('tenant-token', () => {
 
   it('rejects a tampered signature', async () => {
     const token = await signTenantToken({ tenantId: TENANT }, SECRET);
-    const tampered = token.slice(0, -1) + (token.endsWith('a') ? 'b' : 'a');
-    await expect(verifyTenantToken(tampered, SECRET)).rejects.toBeInstanceOf(TokenError);
+    // Flip a char in the PAYLOAD (which the signature covers) so verification
+    // always fails. Flipping the LAST signature char is non-deterministic: it
+    // can land on the base64url char's unused padding bits and decode to the
+    // same signature bytes, leaving the token valid.
+    const parts = token.split('.');
+    parts[1] = (parts[1]!.startsWith('A') ? 'B' : 'A') + parts[1]!.slice(1);
+    await expect(verifyTenantToken(parts.join('.'), SECRET)).rejects.toBeInstanceOf(TokenError);
   });
 
   it('rejects a token with no tenant claim', async () => {
