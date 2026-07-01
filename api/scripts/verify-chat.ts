@@ -154,15 +154,24 @@ async function main() {
 
     const doneEvent = events.find((e) => e.event === 'done');
     const done = doneEvent ? JSON.parse(doneEvent.data) : undefined;
+    // The reply cites only [1], so citations must be exactly that one source
+    // (not both assembled sources) — markers align to chunks actually used (#24).
+    const c0 = done?.citations?.[0];
     check(
-      'final done event carries citations + grounded + latency_ms',
+      'final done event carries grounded + latency + citations mapped to cited markers',
       !!done &&
         done.grounded === true &&
+        typeof done.latency_ms === 'number' &&
         Array.isArray(done.citations) &&
-        done.citations.length > 0 &&
-        done.citations[0].title === 'Refund Policy' &&
-        typeof done.latency_ms === 'number',
-      done ? `citations=${done.citations.length} latency=${done.latency_ms}ms` : 'no done event',
+        done.citations.length === 1 &&
+        c0.marker === 1 &&
+        typeof c0.document_id === 'string' &&
+        c0.title === 'Refund Policy' &&
+        c0.char_start === null &&
+        typeof c0.snippet === 'string',
+      done
+        ? `citations=${done.citations.length} marker=${c0?.marker} latency=${done.latency_ms}ms`
+        : 'no done event',
     );
 
     // 2. Mid-stream disconnect is handled cleanly: read the first frame, then
