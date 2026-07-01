@@ -9,6 +9,8 @@ import { createIngestQueue } from './queue/index.js';
 import { createProviders } from './providers/index.js';
 import { createRetrievalService, type RetrievalService } from './retrieval/retrieval-service.js';
 import { createGenerationService, type GenerationService } from './chat/generation-service.js';
+import { createRateLimiter, type RedisTokenBucket } from './ratelimit/index.js';
+import type { ChatLimits } from './routes/chat.js';
 import type { ObjectStorage } from './storage/index.js';
 import type { IngestQueue } from './queue/index.js';
 
@@ -19,6 +21,8 @@ export interface AppDeps {
   maxBytes: number;
   retrieval: RetrievalService;
   generation: GenerationService;
+  rateLimiter: RedisTokenBucket;
+  limits: ChatLimits;
 }
 
 /** Build real deps from config. The entrypoint owns these so it can close them. */
@@ -31,6 +35,11 @@ export function buildDeps(): AppDeps {
     maxBytes: config.UPLOAD_MAX_BYTES,
     retrieval: createRetrievalService(providers.embedder),
     generation: createGenerationService(providers.chat),
+    rateLimiter: createRateLimiter(config),
+    limits: {
+      contextTokenBudget: config.CHAT_CONTEXT_TOKEN_BUDGET,
+      maxOutputTokens: config.CHAT_MAX_OUTPUT_TOKENS,
+    },
   };
 }
 

@@ -20,9 +20,11 @@ try {
       if (shuttingDown) return;
       shuttingDown = true;
       server.close(() => {
-        void Promise.allSettled([deps.queue.close(), disconnectDb()]).finally(() =>
-          process.exit(0),
-        );
+        void Promise.allSettled([
+          deps.queue.close(),
+          deps.rateLimiter.close(),
+          disconnectDb(),
+        ]).finally(() => process.exit(0));
       });
     });
   }

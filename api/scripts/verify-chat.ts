@@ -94,6 +94,8 @@ async function main() {
   app.use(
     chatRouter(
       {
+        rateLimiter: { consume: () => Promise.resolve({ allowed: true, retryAfterSec: 0 }) },
+        limits: { contextTokenBudget: 2000, maxOutputTokens: 1024 },
         retrieval: createRetrievalService(embedder),
         generation: createGenerationService(
           new FakeChat({ reply: 'Refunds are processed within 30 days [1].' }),
@@ -117,6 +119,8 @@ async function main() {
   refusingApp.use(
     chatRouter(
       {
+        rateLimiter: { consume: () => Promise.resolve({ allowed: true, retryAfterSec: 0 }) },
+        limits: { contextTokenBudget: 2000, maxOutputTokens: 1024 },
         retrieval: createRetrievalService(embedder),
         generation: createGenerationService(new FakeChat({ reply: REFUSAL_MESSAGE })),
       },

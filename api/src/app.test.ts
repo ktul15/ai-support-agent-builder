@@ -3,10 +3,21 @@ import { createApp, type AppDeps } from './app.js';
 import { MemoryStorage } from './storage/memory-storage.js';
 
 // Fake deps so createApp doesn't reach for config / Redis / S3 in unit tests.
+// Everything past storage/queue is inert — the /health test never routes to the
+// chat/document handlers — but AppDeps requires them, so supply fakes (rather
+// than lie with a partial cast that tsc can't catch in test files).
 const testDeps: AppDeps = {
   storage: new MemoryStorage(),
   queue: { enqueue: () => Promise.resolve(), close: () => Promise.resolve() },
   maxBytes: 1024 * 1024,
+  retrieval: { retrieve: () => Promise.resolve([]) },
+  generation: {
+    stream: async function* () {
+      /* no events */
+    },
+  },
+  rateLimiter: { consume: () => Promise.resolve({ allowed: true, retryAfterSec: 0 }) },
+  limits: { contextTokenBudget: 2000, maxOutputTokens: 2048 },
 };
 
 describe('app', () => {
