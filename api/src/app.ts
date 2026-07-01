@@ -3,6 +3,7 @@ import { getConfig } from './config.js';
 import { authRouter } from './routes/auth.js';
 import { documentsRouter } from './routes/documents.js';
 import { chatRouter } from './routes/chat.js';
+import { playgroundRouter } from './routes/playground.js';
 import { tenantContext } from './middleware/tenant-context.js';
 import { createStorage } from './storage/index.js';
 import { createIngestQueue } from './queue/index.js';
@@ -67,6 +68,8 @@ export function createApp(deps: AppDeps = buildDeps()): Express {
   app.use(documentsRouter(deps, tenantContext));
   // Protected: SSE chat (retrieve -> assemble -> generate), tenant from the JWT.
   app.use(chatRouter(deps, tenantContext));
+  // Admin-only: retrieval debug/tuning surface (mirrors the prod retrieval path).
+  app.use(playgroundRouter(deps, tenantContext));
 
   return app;
 }
