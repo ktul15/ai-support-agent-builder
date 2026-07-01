@@ -134,3 +134,18 @@ describe('GET /documents (validation)', () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe('DELETE /documents/:id (validation)', () => {
+  it('401s without a token', async () => {
+    const res = await fetch(`${base}/documents/${ASSISTANT}`, { method: 'DELETE' });
+    expect(res.status).toBe(401);
+  });
+
+  it('400s a non-uuid id', async () => {
+    const res = await fetch(`${base}/documents/not-a-uuid`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${await token()}` },
+    });
+    expect(res.status).toBe(400);
+  });
+});

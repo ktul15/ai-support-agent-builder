@@ -210,6 +210,43 @@ export function documentsRouter(deps: UploadDeps, authMiddleware: RequestHandler
       });
   });
 
+  // Delete a document: removes the row (chunks cascade via FK, so it drops out
+  // of retrieval) and best-effort deletes the stored object. Tenant-scoped by
+  // RLS. A mid-ingestion delete is safe — the worker tolerates a vanished doc.
+  r.delete('/documents/:id', authMiddleware, (req, res) => {
+    const tenant = requireTenant(req);
+    const id = req.params.id;
+    if (!id || !UUID_RE.test(id)) {
+      res.status(400).json({ error: 'invalid document id' });
+      return;
+    }
+    void (async () => {
+      const removed = await withTenant(tenant.tenantId, async (tx) => {
+        const doc = await tx.document.findUnique({ where: { id }, select: { storageKey: true } });
+        if (!doc) return null;
+        // deleteMany (not delete) so a concurrent double-delete matches 0 rows
+        // instead of throwing P2025 -> keeps DELETE idempotent. Chunks cascade.
+        await tx.document.deleteMany({ where: { id } });
+        return doc;
+      });
+      if (!removed) {
+        res.status(404).json({ error: 'document not found' });
+        return;
+      }
+      // The row + chunks are gone; a leftover object is harmless (cost only) and
+      // must not fail the delete.
+      try {
+        await deps.storage.delete(removed.storageKey);
+      } catch (err) {
+        console.error('document storage delete failed:', err);
+      }
+      res.status(204).end();
+    })().catch((err) => {
+      console.error('delete document error:', err);
+      if (!res.headersSent) res.status(500).json({ error: 'internal error' });
+    });
+  });
+
   // Live ingestion progress over SSE: emits a `status` event whenever the
   // document's status changes, then a `done` event at READY/FAILED. Poll-based
   // (no pub/sub bus); compression is not mounted on this app, so writes flush.

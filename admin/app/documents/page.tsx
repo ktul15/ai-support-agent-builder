@@ -13,6 +13,14 @@ interface UploadItem {
   docId?: string;
 }
 
+interface DocumentView {
+  id: string;
+  title: string;
+  status: string;
+  chunkCount: number;
+  updatedAt: string;
+}
+
 let counter = 0;
 const nextKey = (): string => `u${Date.now()}-${counter++}`;
 
@@ -23,6 +31,10 @@ export default function DocumentsPage() {
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const streams = useRef<Map<string, EventSource>>(new Map());
+  const [documents, setDocuments] = useState<DocumentView[]>([]);
+  const [docsLoaded, setDocsLoaded] = useState(false);
+  const [docsError, setDocsError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/assistants')
@@ -43,6 +55,36 @@ export default function DocumentsPage() {
 
   const patch = useCallback((key: string, next: Partial<UploadItem>) => {
     setItems((prev) => prev.map((it) => (it.key === key ? { ...it, ...next } : it)));
+  }, []);
+
+  const fetchDocuments = useCallback(async () => {
+    if (!assistantId) return;
+    try {
+      const res = await fetch(`/api/documents?assistantId=${assistantId}`);
+      if (!res.ok) throw new Error(String(res.status));
+      const data = (await res.json()) as { documents?: DocumentView[] };
+      setDocuments(data.documents ?? []);
+      setDocsError(null);
+    } catch {
+      setDocsError('Could not load your documents.');
+    } finally {
+      setDocsLoaded(true);
+    }
+  }, [assistantId]);
+
+  const deleteDoc = useCallback(async (id: string, title: string) => {
+    if (!window.confirm(`Delete “${title}”? This removes it from your assistant.`)) return;
+    setDeletingId(id);
+    try {
+      const res = await fetch(`/api/documents/${id}`, { method: 'DELETE' });
+      // 404 = already gone elsewhere -> drop it too (delete is idempotent).
+      if (res.ok || res.status === 404) setDocuments((prev) => prev.filter((d) => d.id !== id));
+      else setDocsError('Delete failed. Try again.');
+    } catch {
+      setDocsError('Delete failed. Try again.');
+    } finally {
+      setDeletingId(null);
+    }
   }, []);
 
   const watch = useCallback(
@@ -68,7 +110,13 @@ export default function DocumentsPage() {
           error: data.status === 'FAILED' ? (data.error ?? 'Ingestion failed.') : undefined,
         });
       });
-      es.addEventListener('done', close);
+      es.addEventListener('done', () => {
+        close();
+        // Ingestion reached a terminal state — drop the transient row and let it
+        // appear in the persistent list with its final status + chunk count.
+        setItems((prev) => prev.filter((it) => it.key !== key));
+        void fetchDocuments();
+      });
       es.addEventListener('timeout', () => {
         patch(key, { status: 'error', error: 'Timed out — the document may still be processing.' });
         close();
@@ -88,7 +136,7 @@ export default function DocumentsPage() {
         close();
       });
     },
-    [patch],
+    [patch, fetchDocuments],
   );
 
   const upload = useCallback(
@@ -129,11 +177,21 @@ export default function DocumentsPage() {
     [assistantId, upload],
   );
 
+  // Load the persistent document list once the assistant is known.
+  useEffect(() => {
+    if (assistantId) void fetchDocuments();
+  }, [assistantId, fetchDocuments]);
+
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
     setDragging(false);
     addFiles(e.dataTransfer.files);
   };
+
+  // Hide list rows for docs still shown as live transient uploads, so a Refresh
+  // mid-ingest doesn't render the same document twice.
+  const inFlightDocIds = new Set(items.map((it) => it.docId).filter(Boolean));
+  const listDocs = documents.filter((d) => !inFlightDocIds.has(d.id));
 
   return (
     <main className="dash">
@@ -197,8 +255,66 @@ export default function DocumentsPage() {
           </li>
         ))}
       </ul>
+
+      <section className="doclist">
+        <div className="doclist-head">
+          <h2>Your documents</h2>
+          <button className="ghost" onClick={() => void fetchDocuments()} disabled={!assistantId}>
+            Refresh
+          </button>
+        </div>
+        {docsError && <div className="error">{docsError}</div>}
+        {docsLoaded && listDocs.length === 0 && items.length === 0 ? (
+          <p className="empty">No documents yet. Upload some above to get started.</p>
+        ) : listDocs.length === 0 ? null : (
+          <table className="doctable">
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Status</th>
+                <th>Chunks</th>
+                <th>Updated</th>
+                <th aria-label="actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {listDocs.map((d) => (
+                <tr key={d.id}>
+                  <td className="fname" title={d.title}>
+                    {d.title}
+                  </td>
+                  <td>
+                    <DocBadge status={d.status} />
+                  </td>
+                  <td>{d.chunkCount}</td>
+                  <td className="muted">{formatDate(d.updatedAt)}</td>
+                  <td>
+                    <button
+                      className="ghost"
+                      disabled={deletingId === d.id}
+                      onClick={() => void deleteDoc(d.id, d.title)}
+                    >
+                      {deletingId === d.id ? 'Deleting…' : 'Delete'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
     </main>
   );
+}
+
+function DocBadge({ status }: { status: string }) {
+  const cls = status === 'READY' ? ' ok' : status === 'FAILED' ? ' bad' : '';
+  return <span className={`badge${cls}`}>{statusLabel(status)}</span>;
+}
+
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString();
 }
 
 function StatusBadge({ item }: { item: UploadItem }) {
