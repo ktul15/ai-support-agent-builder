@@ -6,7 +6,7 @@ import { requireTenant } from '../middleware/tenant-context.js';
 import type { RetrievalService } from '../retrieval/retrieval-service.js';
 import type { GenerationService } from '../chat/generation-service.js';
 import { assembleContext, type AssembledSource } from '../chat/prompt-assembly.js';
-import { DEFAULT_GROUNDING_PROMPT } from '../chat/grounding.js';
+import { buildGroundingSystem } from '../chat/grounding.js';
 import { evaluateThreshold, REFUSAL_MESSAGE } from '../chat/refusal.js';
 
 export interface ChatDeps {
@@ -60,10 +60,11 @@ const sse = (event: string, data: unknown): string =>
  * re-compressing it. No compression middleware is mounted yet — when one is
  * added globally it MUST skip this route, or buffering defeats streaming.
  *
- * The pre-LLM refusal threshold gate (#25, invariant #3 gate 1) is wired below.
- * Still pending: the in-prompt grounding contract (#26, reuses REFUSAL_MESSAGE)
- * and the precise citations payload (#24, narrows to only the markers cited).
- * Until #26, `grounded` on the success path is a placeholder (had-sources).
+ * Both refusal gates (invariant #3) are wired: the pre-LLM threshold gate (#25)
+ * and the in-prompt grounding contract (#26, buildGroundingSystem). `grounded`
+ * is true only when the model produced a real answer (not the refusal string)
+ * over a non-empty source set. Still pending: the precise citations payload
+ * (#24, narrows to only the markers the answer actually cited).
  */
 export function chatRouter(deps: ChatDeps, tenantContext: RequestHandler): Router {
   const r = Router();
@@ -161,15 +162,20 @@ export function chatRouter(deps: ChatDeps, tenantContext: RequestHandler): Route
 
         const ctx = assembleContext(hits);
 
+        // Accumulate the answer so we can tell an in-prompt refusal (gate 2, #26)
+        // from a grounded answer — the contract makes the model emit EXACTLY the
+        // refusal string when the sources don't support an answer.
+        let answer = '';
         for await (const event of deps.generation.stream({
           model: assistant.model,
-          system: assistant.systemPrompt ?? DEFAULT_GROUNDING_PROMPT,
+          system: buildGroundingSystem(assistant.systemPrompt),
           question,
           context: ctx.text,
           signal: controller.signal,
         })) {
           if (closed) break;
           if (event.type === 'text') {
+            answer += event.text;
             safeWrite(sse('token', { text: event.text }));
           } else if (event.type === 'error') {
             safeWrite(sse('error', { message: 'generation failed', retryable: event.retryable }));
@@ -179,10 +185,12 @@ export function chatRouter(deps: ChatDeps, tenantContext: RequestHandler): Route
         }
 
         if (!closed) {
+          // The model refused in-prompt iff it emitted exactly the refusal string.
+          const refused = answer.trim() === REFUSAL_MESSAGE;
           safeWrite(
             sse('done', {
-              grounded: ctx.sources.length > 0,
-              citations: toCitations(ctx.sources),
+              grounded: !refused && ctx.sources.length > 0,
+              citations: refused ? [] : toCitations(ctx.sources),
               latency_ms: Math.round(performance.now() - t0),
             }),
           );

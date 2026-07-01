@@ -109,6 +109,26 @@ async function main() {
   const url = `http://127.0.0.1:${port}/chat`;
   const auth = `Bearer ${await signTenantToken({ tenantId }, SECRET)}`;
 
+  // Second app whose model "refuses in-prompt" (replies EXACTLY the refusal
+  // string) — to prove the grounded=false detection on the grounded assistant,
+  // which DOES have sources (it cleared the threshold gate).
+  const refusingApp = express();
+  refusingApp.use(express.json());
+  refusingApp.use(
+    chatRouter(
+      {
+        retrieval: createRetrievalService(embedder),
+        generation: createGenerationService(new FakeChat({ reply: REFUSAL_MESSAGE })),
+      },
+      makeTenantContext(SECRET),
+    ),
+  );
+  const refusingServer: Server = refusingApp.listen(0);
+  await new Promise<void>((r) => refusingServer.once('listening', r));
+  const refusingAddr = refusingServer.address();
+  const refusingPort = typeof refusingAddr === 'object' && refusingAddr ? refusingAddr.port : 0;
+  const refusingUrl = `http://127.0.0.1:${refusingPort}/chat`;
+
   try {
     // 1. Happy path: tokens stream, final `done` carries citations + grounded + latency.
     const res = await fetch(url, {
@@ -195,7 +215,28 @@ async function main() {
       `answer="${refuseAnswer.slice(0, 30)}…" grounded=${rdone?.grounded}`,
     );
 
-    // 4. 404 for an unknown assistant (pre-stream HTTP error, not an SSE frame).
+    // 4. Grounding contract (#26): the assistant HAS sources (passes the gate),
+    //    but the model emits exactly the refusal string -> grounded=false and no
+    //    citations, even though sources were retrieved.
+    const inPromptRes = await fetch(refusingUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: auth },
+      body: JSON.stringify({ assistantId, question: 'how long do refunds take?' }),
+    });
+    const ipEvents = await readSse(inPromptRes.body!);
+    const ipAnswer = ipEvents
+      .filter((e) => e.event === 'token')
+      .map((t) => JSON.parse(t.data).text)
+      .join('');
+    const ipDoneEvent = ipEvents.find((e) => e.event === 'done');
+    const ipDone = ipDoneEvent ? JSON.parse(ipDoneEvent.data) : undefined;
+    check(
+      'in-prompt refusal sets grounded=false + no citations despite having sources',
+      ipAnswer === REFUSAL_MESSAGE && ipDone?.grounded === false && ipDone.citations.length === 0,
+      `grounded=${ipDone?.grounded} citations=${ipDone?.citations?.length}`,
+    );
+
+    // 5. 404 for an unknown assistant (pre-stream HTTP error, not an SSE frame).
     const notFound = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: auth },
@@ -204,6 +245,7 @@ async function main() {
     check('unknown assistant returns 404', notFound.status === 404, `status=${notFound.status}`);
   } finally {
     await new Promise<void>((r) => server.close(() => r()));
+    await new Promise<void>((r) => refusingServer.close(() => r()));
   }
 }
 
