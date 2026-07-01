@@ -112,3 +112,105 @@ button.ghost {
   font-size: 14px;
   cursor: pointer;
 }
+
+.primary-link {
+  color: #4f46e5;
+  font-weight: 600;
+  text-decoration: none;
+}
+.dropzone {
+  margin: 20px 0;
+  border: 2px dashed #c7cad1;
+  border-radius: 12px;
+  padding: 36px 24px;
+  text-align: center;
+  cursor: pointer;
+  background: #fff;
+  transition:
+    border-color 0.12s,
+    background 0.12s;
+}
+.dropzone:hover,
+.dropzone.dragging {
+  border-color: #4f46e5;
+  background: #f5f5ff;
+}
+.dropzone p {
+  margin: 4px 0;
+}
+.dropzone .hint {
+  color: #6b7280;
+  font-size: 13px;
+}
+.uploads {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.upload-row {
+  background: #fff;
+  border: 1px solid #e4e6eb;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+}
+.upload-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.fname {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #4338ca;
+  white-space: nowrap;
+}
+.badge.ok {
+  background: #ecfdf5;
+  color: #047857;
+}
+.badge.bad {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+.steps {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.step {
+  font-size: 12px;
+  color: #9ca3af;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #f3f4f6;
+}
+.step.done {
+  color: #047857;
+  background: #ecfdf5;
+}
+.step.active {
+  color: #4338ca;
+  background: #eef2ff;
+  font-weight: 600;
+}
+.row-error {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+  color: #b91c1c;
+  font-size: 13px;
+}

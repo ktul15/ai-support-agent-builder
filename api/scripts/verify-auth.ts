@@ -106,6 +106,26 @@ async function main() {
     `count ${meBody.count}`,
   );
 
+  // 3b. Signup provisioned exactly one default assistant, and GET /assistants
+  //     (token-scoped) returns it — the admin's upload/publish target.
+  const asstRows = await owner.$queryRaw<{ n: bigint }[]>`
+    SELECT count(*)::bigint AS n FROM assistant WHERE tenant_id = ${tenantId}::uuid`;
+  const asstRes = await fetch(`${base}/assistants`, {
+    headers: { authorization: `Bearer ${signupBody.token}` },
+  });
+  const asstBody = (await asstRes.json()) as {
+    assistants?: { id: string; name: string; status: string }[];
+  };
+  check(
+    'signup provisions a default assistant, listed by GET /assistants',
+    Number(asstRows[0]!.n) === 1 &&
+      asstRes.status === 200 &&
+      asstBody.assistants?.length === 1 &&
+      asstBody.assistants[0]!.name === 'Default assistant' &&
+      typeof asstBody.assistants[0]!.id === 'string',
+    `db=${asstRows[0]!.n} listed=${asstBody.assistants?.length}`,
+  );
+
   // 4. Login with correct credentials succeeds.
   const loginRes = await post('/auth/login', { email: EMAIL, password: PASSWORD });
   check('login with correct credentials returns a token', loginRes.status === 200);

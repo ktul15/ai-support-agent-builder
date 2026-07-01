@@ -4,6 +4,7 @@ import { authRouter } from './routes/auth.js';
 import { documentsRouter } from './routes/documents.js';
 import { chatRouter } from './routes/chat.js';
 import { playgroundRouter } from './routes/playground.js';
+import { assistantsRouter } from './routes/assistants.js';
 import { tenantContext } from './middleware/tenant-context.js';
 import { createStorage } from './storage/index.js';
 import { createIngestQueue } from './queue/index.js';
@@ -70,6 +71,8 @@ export function createApp(deps: AppDeps = buildDeps()): Express {
   app.use(chatRouter(deps, tenantContext));
   // Admin-only: retrieval debug/tuning surface (mirrors the prod retrieval path).
   app.use(playgroundRouter(deps, tenantContext));
+  // Protected: list the tenant's assistants (upload/publish targets).
+  app.use(assistantsRouter(tenantContext));
 
   return app;
 }
