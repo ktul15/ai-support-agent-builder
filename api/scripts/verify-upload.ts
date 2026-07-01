@@ -132,6 +132,28 @@ async function main() {
     `status ${badRes.status}`,
   );
 
+  // Delete: seed a chunk, then DELETE removes the row, cascades the chunk (drops
+  // it out of retrieval), and deletes the stored object.
+  await owner.$executeRaw`INSERT INTO chunk (id, tenant_id, document_id, assistant_id, content, token_count, content_hash)
+    VALUES (gen_random_uuid(), ${tenantId}::uuid, ${documentId}::uuid, ${assistantId}::uuid, 'c', 5, md5('c' || ${documentId}))`;
+  const delRes = await fetch(`${base}/documents/${documentId}`, {
+    method: 'DELETE',
+    headers: { authorization: `Bearer ${token}` },
+  });
+  const docsLeft = await owner.$queryRaw<{ n: bigint }[]>`
+    SELECT count(*)::bigint AS n FROM document WHERE id = ${documentId}::uuid`;
+  const chunksLeft = await owner.$queryRaw<{ n: bigint }[]>`
+    SELECT count(*)::bigint AS n FROM chunk WHERE document_id = ${documentId}::uuid`;
+  const objGone = !(await storage.exists(`tenants/${tenantId}/${documentId}/original`));
+  check(
+    'delete removes the document, cascades its chunks, and deletes the object',
+    delRes.status === 204 &&
+      Number(docsLeft[0]!.n) === 0 &&
+      Number(chunksLeft[0]!.n) === 0 &&
+      objGone,
+    `status=${delRes.status} docs=${docsLeft[0]!.n} chunks=${chunksLeft[0]!.n} objGone=${objGone}`,
+  );
+
   await new Promise<void>((r) => server.close(() => r()));
 }
 
