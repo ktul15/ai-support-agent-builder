@@ -5,9 +5,10 @@ import { withTenant } from '../db.js';
 import { requireTenant } from '../middleware/tenant-context.js';
 import type { RetrievalService } from '../retrieval/retrieval-service.js';
 import type { GenerationService } from '../chat/generation-service.js';
-import { assembleContext, type AssembledSource } from '../chat/prompt-assembly.js';
+import { assembleContext } from '../chat/prompt-assembly.js';
 import { buildGroundingSystem } from '../chat/grounding.js';
 import { evaluateThreshold, REFUSAL_MESSAGE } from '../chat/refusal.js';
+import { buildCitations } from '../chat/citations.js';
 
 export interface ChatDeps {
   retrieval: RetrievalService;
@@ -21,31 +22,6 @@ const bodySchema = z.object({
 
 const HEARTBEAT_MS = 15_000;
 const MAX_STREAM_MS = 120_000;
-
-/** marker -> chunk citation. #24 refines (only markers the answer actually cites). */
-interface ChatCitation {
-  marker: number;
-  documentId: string;
-  title: string;
-  page: number | null;
-  section: string | null;
-  charStart: number | null;
-  charEnd: number | null;
-  snippet: string;
-}
-
-function toCitations(sources: AssembledSource[]): ChatCitation[] {
-  return sources.map((s) => ({
-    marker: s.marker,
-    documentId: s.documentId,
-    title: s.title,
-    page: s.page,
-    section: s.section,
-    charStart: s.charStart,
-    charEnd: s.charEnd,
-    snippet: s.content.slice(0, 300),
-  }));
-}
 
 const sse = (event: string, data: unknown): string =>
   `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -187,10 +163,16 @@ export function chatRouter(deps: ChatDeps, tenantContext: RequestHandler): Route
         if (!closed) {
           // The model refused in-prompt iff it emitted exactly the refusal string.
           const refused = answer.trim() === REFUSAL_MESSAGE;
+          // Only the sources the answer actually cited (#24), not every source
+          // shown to the model.
+          const citations = refused ? [] : buildCitations(answer, ctx.sources);
           safeWrite(
             sse('done', {
-              grounded: !refused && ctx.sources.length > 0,
-              citations: refused ? [] : toCitations(ctx.sources),
+              // Grounded = a real answer anchored to >=1 cited source. An answer
+              // that refused, or that cited nothing (incl. an empty answer), is
+              // not something the corpus verifiably backs.
+              grounded: !refused && citations.length > 0,
+              citations,
               latency_ms: Math.round(performance.now() - t0),
             }),
           );
