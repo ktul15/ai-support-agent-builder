@@ -18,6 +18,7 @@ import { retrieveChunks } from '../src/retrieval/retrieve.js';
 import { createRetrievalService } from '../src/retrieval/retrieval-service.js';
 import { assembleContext } from '../src/chat/prompt-assembly.js';
 import { createGenerationService, collectAnswer } from '../src/chat/generation-service.js';
+import { PrismaDocumentStatusStore } from '../src/worker/document-store.js';
 import { disconnectDb } from '../src/db.js';
 import { FakeEmbedder } from '../src/providers/fake-embedder.js';
 import { FakeChat } from '../src/providers/fake-chat.js';
@@ -77,6 +78,7 @@ async function main() {
   const hits = await retrieveChunks(tenantA, {
     assistantId: a1,
     queryEmbedding: queryEmbedding!,
+    embeddingModel: 'fake-embedder',
     k: 5,
   });
   const top = hits[0];
@@ -96,6 +98,7 @@ async function main() {
   const crossTenant = await retrieveChunks(tenantA, {
     assistantId: b1,
     queryEmbedding: queryEmbedding!,
+    embeddingModel: 'fake-embedder',
     k: 50,
   });
   check(
@@ -108,6 +111,7 @@ async function main() {
   const a2hits = await retrieveChunks(tenantA, {
     assistantId: a2,
     queryEmbedding: queryEmbedding!,
+    embeddingModel: 'fake-embedder',
     k: 50,
   });
   check(
@@ -153,6 +157,43 @@ async function main() {
     serviceHits.length === 3 && serviceHits[0]?.content === target,
     serviceHits[0] ? `top="${serviceHits[0].content}" k=${serviceHits.length}` : 'no hits',
   );
+
+  // 5b. Invariant #4: a corpus embedded with a different model is rejected loudly
+  //     (not silently mis-scored). Stamp a2's corpus with a foreign model, then
+  //     query it with the fake embedder's model.
+  await owner.$executeRaw`UPDATE assistant SET embedding_model = 'foreign-model-x' WHERE id = ${a2}::uuid`;
+  let rejected = false;
+  try {
+    await retrieveChunks(tenantA, {
+      assistantId: a2,
+      queryEmbedding: queryEmbedding!,
+      embeddingModel: 'fake-embedder',
+      k: 3,
+    });
+  } catch (err) {
+    rejected = err instanceof Error && /embedding model mismatch/.test(err.message);
+  }
+  check('a query whose model differs from the corpus is rejected', rejected, 'mismatch threw');
+  await owner.$executeRaw`UPDATE assistant SET embedding_model = NULL WHERE id = ${a2}::uuid`;
+
+  // 5c. Ingest side (real document-store SQL, not the fake): ensureEmbeddingModel
+  //     claims the model on first call, then rejects a different model.
+  const store = new PrismaDocumentStatusStore();
+  await store.ensureEmbeddingModel(tenantA, a2, 'model-x');
+  const claimed = await owner.$queryRaw<{ embedding_model: string | null }[]>`
+    SELECT embedding_model FROM assistant WHERE id = ${a2}::uuid`;
+  let mixRejected = false;
+  try {
+    await store.ensureEmbeddingModel(tenantA, a2, 'model-y');
+  } catch (err) {
+    mixRejected = err instanceof Error && /refusing to mix/.test(err.message);
+  }
+  check(
+    'ensureEmbeddingModel claims the model then rejects a second model',
+    claimed[0]?.embedding_model === 'model-x' && mixRejected,
+    `claimed=${claimed[0]?.embedding_model} mixRejected=${mixRejected}`,
+  );
+  await owner.$executeRaw`UPDATE assistant SET embedding_model = NULL WHERE id = ${a2}::uuid`;
 
   // 6. Prompt assembly (#21): chunks -> numbered, deterministic sources block.
   const ctx = assembleContext(serviceHits);

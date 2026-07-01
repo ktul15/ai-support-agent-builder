@@ -225,10 +225,14 @@ export function chatRouter(deps: ChatDeps, tenantContext: RequestHandler): Route
           );
           end();
         }
-      } catch {
+      } catch (err) {
         if (closed) return;
+        // Log the real cause server-side (e.g. an embedding-model mismatch, #53)
+        // so an operator can diagnose it — the client only ever sees a generic
+        // failure, never internals.
+        console.error(`chat error: ${err instanceof Error ? err.message : String(err)}`);
         // Pre-headers (DB/setup) error -> plain HTTP 503; post-headers -> SSE
-        // error frame. Never leak internals either way.
+        // error frame.
         if (res.headersSent) safeWrite(sse('error', { message: 'internal error' }));
         else res.status(503).json({ error: 'service unavailable' });
         end();

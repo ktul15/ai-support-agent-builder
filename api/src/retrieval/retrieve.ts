@@ -30,6 +30,8 @@ export interface RetrieveParams {
   assistantId: string;
   /** Query vector — MUST be from the same embedding model as the corpus. */
   queryEmbedding: number[];
+  /** The query embedder's model id — asserted against the corpus (invariant #4). */
+  embeddingModel: string;
   k: number;
 }
 
@@ -70,6 +72,21 @@ export async function retrieveChunks(
   const vector = `[${params.queryEmbedding.join(',')}]`;
 
   return withTenant(tenantId, async (tx) => {
+    // Invariant #4: a query embedded with a different model than the corpus lives
+    // in a foreign vector space (even at the same dimension) -> garbage cosine.
+    // Fail loud rather than silently return wrong chunks. Null = no corpus
+    // embedded yet, so nothing to compare against (the scan returns no rows).
+    const assistant = await tx.assistant.findUnique({
+      where: { id: params.assistantId },
+      select: { embeddingModel: true },
+    });
+    if (assistant?.embeddingModel && assistant.embeddingModel !== params.embeddingModel) {
+      throw new Error(
+        `retrieveChunks: embedding model mismatch — corpus="${assistant.embeddingModel}" ` +
+          `query="${params.embeddingModel}". Re-embed the corpus before querying.`,
+      );
+    }
+
     // strict_order: iterative scan returns rows in exact distance order, so the
     // SQL LIMIT k is the true top-k of the filtered set (transaction-local).
     await tx.$executeRaw`SELECT set_config('hnsw.iterative_scan', 'strict_order', true)`;

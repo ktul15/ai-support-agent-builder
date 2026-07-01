@@ -95,6 +95,10 @@ model Assistant {
   name             String
   systemPrompt     String?         @map("system_prompt")
   model            String          @default("claude-haiku-4-5")
+  // The embedding model this assistant's corpus was embedded with. Claimed on
+  // first ingest; query + corpus MUST share it (invariant #4). Null until the
+  // first chunk is embedded.
+  embeddingModel   String?         @map("embedding_model")
   refusalThreshold Float           @default(0.35) @map("refusal_threshold")
   status           AssistantStatus @default(DRAFT)
   createdAt        DateTime        @default(now()) @map("created_at")
