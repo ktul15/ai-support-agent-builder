@@ -41,6 +41,8 @@ import {
   type OffCorpusResult,
 } from '../src/eval/scoring.js';
 import { collectChat, type SseFrame } from '../src/eval/sse.js';
+import { silentLogger } from '../src/observability/logger.js';
+import { UsageMeter } from '../src/observability/usage-meter.js';
 import { disconnectDb } from '../src/db.js';
 
 config({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../..', '.env') });
@@ -130,6 +132,8 @@ async function main() {
     chatRouter(
       {
         rateLimiter: { consume: () => Promise.resolve({ allowed: true, retryAfterSec: 0 }) },
+        logger: silentLogger,
+        meter: new UsageMeter(),
         limits: { contextTokenBudget: 2000, maxOutputTokens: 1024 },
         retrieval: createRetrievalService(providers.embedder),
         generation: createGenerationService(providers.chat),

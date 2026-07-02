@@ -29,7 +29,8 @@
     "verify:chat": "tsx scripts/verify-chat.ts",
     "verify:ratelimit": "tsx scripts/verify-ratelimit.ts",
     "verify:playground": "tsx scripts/verify-playground.ts",
-    "eval": "tsx scripts/eval-run.ts"
+    "eval": "tsx scripts/eval-run.ts",
+    "verify:observability": "tsx scripts/verify-observability.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.3",

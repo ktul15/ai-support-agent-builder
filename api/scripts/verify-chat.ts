@@ -25,6 +25,8 @@ import { FakeEmbedder } from '../src/providers/fake-embedder.js';
 import { FakeChat } from '../src/providers/fake-chat.js';
 import { REFUSAL_MESSAGE } from '../src/chat/refusal.js';
 import { disconnectDb } from '../src/db.js';
+import { silentLogger } from '../src/observability/logger.js';
+import { UsageMeter } from '../src/observability/usage-meter.js';
 
 config({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../..', '.env') });
 
@@ -95,6 +97,8 @@ async function main() {
     chatRouter(
       {
         rateLimiter: { consume: () => Promise.resolve({ allowed: true, retryAfterSec: 0 }) },
+        logger: silentLogger,
+        meter: new UsageMeter(),
         limits: { contextTokenBudget: 2000, maxOutputTokens: 1024 },
         retrieval: createRetrievalService(embedder),
         generation: createGenerationService(
@@ -120,6 +124,8 @@ async function main() {
     chatRouter(
       {
         rateLimiter: { consume: () => Promise.resolve({ allowed: true, retryAfterSec: 0 }) },
+        logger: silentLogger,
+        meter: new UsageMeter(),
         limits: { contextTokenBudget: 2000, maxOutputTokens: 1024 },
         retrieval: createRetrievalService(embedder),
         generation: createGenerationService(new FakeChat({ reply: REFUSAL_MESSAGE })),
