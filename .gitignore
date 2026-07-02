@@ -38,3 +38,6 @@ tmp/
 .idea/
 .vscode/
 *.swp
+
+# eval harness output (#40)
+api/eval/eval-report.json
