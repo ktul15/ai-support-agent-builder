@@ -66,4 +66,57 @@ void main() {
     await tester.pump();
     expect(find.text('Hello'), findsOneWidget); // finalized message
   });
+
+  testWidgets('tapping a citation chip opens the source bottom-sheet', (tester) async {
+    await _bootDi();
+    final controller = StreamController<ChatStreamEvent>();
+    getIt.unregister<ChatRepository>();
+    getIt.registerFactory<ChatRepository>(() => _StreamRepo(controller.stream));
+
+    await tester.pumpWidget(const App());
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'refunds?');
+    await tester.tap(find.byTooltip('Send'));
+    await tester.pump();
+    controller.add(const TokenChunk('See the policy.'));
+    await tester.pump();
+    controller.add(
+      const StreamDone(
+        grounded: true,
+        citations: [
+          Citation(
+            marker: 1,
+            documentId: 'd1',
+            title: 'Refund Policy',
+            page: 3,
+            snippet: 'Refunds within 30 days.',
+          ),
+          // No page/section and no title — exercises the 'Source' label + the
+          // empty-title chip guard.
+          Citation(marker: 2, documentId: 'd2', title: '', snippet: 'Any time.'),
+        ],
+      ),
+    );
+    await controller.close();
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('[1]'), findsOneWidget);
+    expect(find.textContaining('[2]'), findsOneWidget);
+
+    // First source: title + page + the grounding snippet, then Open document.
+    await tester.tap(find.textContaining('[1]'));
+    await tester.pumpAndSettle();
+    expect(find.text('Refunds within 30 days.'), findsOneWidget);
+    expect(find.text('Page 3'), findsOneWidget);
+
+    await tester.tap(find.text('Open document'));
+    await tester.pumpAndSettle();
+    expect(find.text('Full document view is coming soon.'), findsOneWidget);
+
+    // Second source: no page/section -> 'Source' label.
+    await tester.tap(find.textContaining('[2]'));
+    await tester.pumpAndSettle();
+    expect(find.text('Any time.'), findsOneWidget);
+    expect(find.text('Source'), findsOneWidget);
+  });
 }
