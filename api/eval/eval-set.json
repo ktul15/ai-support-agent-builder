@@ -1,0 +1,299 @@
+{
+  "version": 1,
+  "corpus": "brightbrew",
+  "description": "Ground-truth eval set for the Brightbrew demo corpus (api/eval/corpus). inCorpus answers must be grounded in one of expectedDocs and contain expectedFacts (case-insensitive substrings); offCorpus questions must be refused.",
+  "inCorpus": [
+    {
+      "id": "ic-01",
+      "question": "How much does the Standard plan cost?",
+      "expectedFacts": ["$24"],
+      "expectedDocs": ["plans-and-pricing.md"],
+      "tags": ["pricing"]
+    },
+    {
+      "id": "ic-02",
+      "question": "What do I get with the Pro plan?",
+      "expectedFacts": ["$45", "free shipping"],
+      "expectedDocs": ["plans-and-pricing.md"],
+      "tags": ["pricing"]
+    },
+    {
+      "id": "ic-03",
+      "question": "Is there a discount if I pay annually?",
+      "expectedFacts": ["15%"],
+      "expectedDocs": ["plans-and-pricing.md"],
+      "tags": ["pricing", "billing"]
+    },
+    {
+      "id": "ic-04",
+      "question": "Which plan is the cheapest?",
+      "expectedFacts": ["Taster", "$12"],
+      "expectedDocs": ["plans-and-pricing.md"],
+      "tags": ["pricing"]
+    },
+    {
+      "id": "ic-05",
+      "question": "How many bags come with the Standard plan each month?",
+      "expectedFacts": ["2", "12 oz"],
+      "expectedDocs": ["plans-and-pricing.md"],
+      "tags": ["pricing"]
+    },
+    {
+      "id": "ic-06",
+      "question": "Which plan includes free shipping?",
+      "expectedFacts": ["Pro"],
+      "expectedDocs": ["plans-and-pricing.md", "shipping-and-delivery.md"],
+      "tags": ["pricing", "shipping"]
+    },
+    {
+      "id": "ic-07",
+      "question": "Is there a cancellation fee?",
+      "expectedFacts": ["no cancellation fee"],
+      "expectedDocs": ["returns-and-refunds.md", "plans-and-pricing.md"],
+      "tags": ["billing", "cancellation"]
+    },
+    {
+      "id": "ic-08",
+      "question": "How much is shipping on the Taster plan?",
+      "expectedFacts": ["$5"],
+      "expectedDocs": ["plans-and-pricing.md", "shipping-and-delivery.md"],
+      "tags": ["shipping", "pricing"]
+    },
+    {
+      "id": "ic-09",
+      "question": "How long does delivery take in the US?",
+      "expectedFacts": ["3", "5", "business days"],
+      "expectedDocs": ["shipping-and-delivery.md"],
+      "tags": ["shipping"]
+    },
+    {
+      "id": "ic-10",
+      "question": "Do you ship to Canada?",
+      "expectedFacts": ["Canada", "$9"],
+      "expectedDocs": ["shipping-and-delivery.md"],
+      "tags": ["shipping"]
+    },
+    {
+      "id": "ic-11",
+      "question": "Do you ship internationally?",
+      "expectedFacts": ["United States", "Canada"],
+      "expectedDocs": ["shipping-and-delivery.md"],
+      "tags": ["shipping"]
+    },
+    {
+      "id": "ic-12",
+      "question": "How soon do you ship after roasting?",
+      "expectedFacts": ["2 business days"],
+      "expectedDocs": ["shipping-and-delivery.md", "about.md"],
+      "tags": ["shipping", "freshness"]
+    },
+    {
+      "id": "ic-13",
+      "question": "How long does delivery to Canada take?",
+      "expectedFacts": ["5", "8", "business days"],
+      "expectedDocs": ["shipping-and-delivery.md"],
+      "tags": ["shipping"]
+    },
+    {
+      "id": "ic-14",
+      "question": "Will I get a tracking number?",
+      "expectedFacts": ["tracking", "email"],
+      "expectedDocs": ["shipping-and-delivery.md"],
+      "tags": ["shipping"]
+    },
+    {
+      "id": "ic-15",
+      "question": "What is your refund policy?",
+      "expectedFacts": ["30 days", "full refund"],
+      "expectedDocs": ["returns-and-refunds.md"],
+      "tags": ["refunds"]
+    },
+    {
+      "id": "ic-16",
+      "question": "Do I have to send the coffee back to get a refund?",
+      "expectedFacts": ["perishable"],
+      "expectedDocs": ["returns-and-refunds.md"],
+      "tags": ["refunds"]
+    },
+    {
+      "id": "ic-17",
+      "question": "How long do refunds take to process?",
+      "expectedFacts": ["5 business days"],
+      "expectedDocs": ["returns-and-refunds.md"],
+      "tags": ["refunds"]
+    },
+    {
+      "id": "ic-18",
+      "question": "How do I pause my subscription?",
+      "expectedFacts": ["account settings", "any time"],
+      "expectedDocs": ["returns-and-refunds.md"],
+      "tags": ["account", "cancellation"]
+    },
+    {
+      "id": "ic-19",
+      "question": "Where is Brightbrew based?",
+      "expectedFacts": ["Portland", "Oregon"],
+      "expectedDocs": ["about.md"],
+      "tags": ["company"]
+    },
+    {
+      "id": "ic-20",
+      "question": "Where do your coffee beans come from?",
+      "expectedFacts": ["Ethiopia", "Colombia", "Guatemala"],
+      "expectedDocs": ["about.md"],
+      "tags": ["product"]
+    },
+    {
+      "id": "ic-21",
+      "question": "What roast levels do you offer?",
+      "expectedFacts": ["light", "medium", "dark"],
+      "expectedDocs": ["about.md"],
+      "tags": ["product"]
+    },
+    {
+      "id": "ic-22",
+      "question": "When was Brightbrew founded?",
+      "expectedFacts": ["2021"],
+      "expectedDocs": ["about.md"],
+      "tags": ["company"]
+    },
+    {
+      "id": "ic-23",
+      "question": "Do you roast the coffee to order?",
+      "expectedFacts": ["to order"],
+      "expectedDocs": ["about.md"],
+      "tags": ["product", "freshness"]
+    },
+    {
+      "id": "ic-24",
+      "question": "Can I get my coffee already ground?",
+      "expectedFacts": ["ground", "drip", "espresso", "French press"],
+      "expectedDocs": ["faq.md"],
+      "tags": ["product"]
+    },
+    {
+      "id": "ic-25",
+      "question": "Do you offer decaf?",
+      "expectedFacts": ["decaf", "Colombian"],
+      "expectedDocs": ["faq.md"],
+      "tags": ["product"]
+    },
+    {
+      "id": "ic-26",
+      "question": "How should I store my coffee?",
+      "expectedFacts": ["airtight", "cool", "dark", "4 weeks"],
+      "expectedDocs": ["faq.md"],
+      "tags": ["product", "freshness"]
+    },
+    {
+      "id": "ic-27",
+      "question": "Do you sell gift subscriptions?",
+      "expectedFacts": ["gift", "3", "6", "12"],
+      "expectedDocs": ["faq.md"],
+      "tags": ["gifting"]
+    },
+    {
+      "id": "ic-28",
+      "question": "How do I change my plan?",
+      "expectedFacts": ["dashboard", "any time"],
+      "expectedDocs": ["faq.md"],
+      "tags": ["account"]
+    },
+    {
+      "id": "ic-29",
+      "question": "What grind options can I choose?",
+      "expectedFacts": ["drip", "espresso", "French press"],
+      "expectedDocs": ["faq.md"],
+      "tags": ["product"]
+    },
+    {
+      "id": "ic-30",
+      "question": "How fresh should the coffee be when I use it?",
+      "expectedFacts": ["4 weeks", "roast"],
+      "expectedDocs": ["faq.md"],
+      "tags": ["freshness"]
+    },
+    {
+      "id": "ic-31",
+      "question": "Can I cancel my subscription whenever I want?",
+      "expectedFacts": ["cancel", "any time", "no cancellation fee"],
+      "expectedDocs": ["returns-and-refunds.md", "plans-and-pricing.md"],
+      "tags": ["cancellation"]
+    },
+    {
+      "id": "ic-32",
+      "question": "How much coffee comes in a Taster plan bag?",
+      "expectedFacts": ["6 oz"],
+      "expectedDocs": ["plans-and-pricing.md"],
+      "tags": ["pricing", "product"]
+    }
+  ],
+  "offCorpus": [
+    {
+      "id": "oc-01",
+      "question": "What's the weather in Portland today?",
+      "reason": "Real-time information not in the corpus.",
+      "tags": ["real-time"]
+    },
+    {
+      "id": "oc-02",
+      "question": "What's the best home espresso machine to buy?",
+      "reason": "Product recommendation outside Brightbrew's documents.",
+      "tags": ["off-topic"]
+    },
+    {
+      "id": "oc-03",
+      "question": "How much does a Starbucks latte cost?",
+      "reason": "Competitor information not in the corpus.",
+      "tags": ["competitor"]
+    },
+    {
+      "id": "oc-04",
+      "question": "What is the capital of France?",
+      "reason": "General knowledge unrelated to the business.",
+      "tags": ["general-knowledge"]
+    },
+    {
+      "id": "oc-05",
+      "question": "Can you write me a Python function to sort a list?",
+      "reason": "Coding help unrelated to the business.",
+      "tags": ["off-topic"]
+    },
+    {
+      "id": "oc-06",
+      "question": "Is drinking coffee bad for my heart?",
+      "reason": "Medical advice not covered by the corpus.",
+      "tags": ["medical"]
+    },
+    {
+      "id": "oc-07",
+      "question": "Do you have a mobile app?",
+      "reason": "The corpus says nothing about a mobile app — no scope fact to answer from.",
+      "tags": ["out-of-scope-feature"]
+    },
+    {
+      "id": "oc-08",
+      "question": "Do you have a rewards or loyalty points program?",
+      "reason": "No loyalty or rewards program is described anywhere in the corpus.",
+      "tags": ["out-of-scope-feature"]
+    },
+    {
+      "id": "oc-09",
+      "question": "What is the CEO's salary?",
+      "reason": "Not disclosed in the corpus.",
+      "tags": ["not-disclosed"]
+    },
+    {
+      "id": "oc-10",
+      "question": "Can you recommend a good wine to pair with dinner?",
+      "reason": "Unrelated to coffee or the business.",
+      "tags": ["off-topic"]
+    },
+    {
+      "id": "oc-11",
+      "question": "What is your customer support phone number?",
+      "reason": "No phone number or contact detail appears in the corpus.",
+      "tags": ["not-disclosed"]
+    }
+  ]
+}
