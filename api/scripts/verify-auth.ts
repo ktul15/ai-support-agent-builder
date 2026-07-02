@@ -191,17 +191,66 @@ async function main() {
     `keys=${listBody.api_keys?.length}`,
   );
 
-  // 3g. Revoke: the key row is gone and no longer resolves.
+  // 3h. Consumer exchange: the key trades for an assistant-scoped JWT (the
+  //     assistant is PUBLISHED from 3d), and that JWT is accepted by /chat.
+  const exchange = (apiKey: string): Promise<Response> =>
+    fetch(`${base}/auth/api-key`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ apiKey }),
+    });
+  const exchRes = await exchange(keyBody.key);
+  const exchBody = (await exchRes.json()) as { token?: string };
+  const claims = exchBody.token ? await verifyTenantToken(exchBody.token, SECRET!) : null;
+  check(
+    'api key exchanges for an assistant-scoped consumer token',
+    exchRes.status === 200 &&
+      claims?.tenantId === tenantId &&
+      claims?.assistantId === asstId &&
+      !claims?.userId,
+    `status=${exchRes.status} aid=${claims?.assistantId === asstId}`,
+  );
+  // The consumer token reaches /chat (no assistantId in the body — it's pinned by
+  // the token). Empty corpus -> the gate refuses, but the request is ACCEPTED.
+  const chatRes = await fetch(`${base}/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${exchBody.token}` },
+    body: JSON.stringify({ question: 'hi' }),
+  });
+  check(
+    'consumer token is accepted by /chat (assistant pinned by the token)',
+    chatRes.status === 200 &&
+      (chatRes.headers.get('content-type') ?? '').includes('text/event-stream'),
+    `status=${chatRes.status}`,
+  );
+  await chatRes.body?.cancel();
+
+  // 3i. A bad key and a non-published assistant are refused.
+  const badExch = await exchange('asab_sk_definitely-not-a-real-key');
+  await fetch(`${base}/assistants/${asstId}`, {
+    method: 'PATCH',
+    headers: admin,
+    body: JSON.stringify({ status: 'DRAFT' }),
+  });
+  const draftExch = await exchange(keyBody.key);
+  check(
+    'exchange refuses an unknown key (401) and a non-published assistant (403)',
+    badExch.status === 401 && draftExch.status === 403,
+    `bad=${badExch.status} draft=${draftExch.status}`,
+  );
+
+  // 3g. Revoke: the key row is gone, no longer resolves, and can't be exchanged.
   const delRes = await fetch(`${base}/assistants/${asstId}/api-keys/${keyBody.id}`, {
     method: 'DELETE',
     headers: admin,
   });
   const afterResolve = await owner.$queryRaw<{ tenant_id: string }[]>`
     SELECT tenant_id FROM auth_resolve_api_key(${hashApiKey(keyBody.key)})`;
+  const revokedExch = await exchange(keyBody.key);
   check(
-    'revoke deletes the key so it no longer resolves',
-    delRes.status === 204 && afterResolve.length === 0,
-    `status=${delRes.status} stillResolves=${afterResolve.length}`,
+    'revoke deletes the key so it no longer resolves or exchanges',
+    delRes.status === 204 && afterResolve.length === 0 && revokedExch.status === 401,
+    `status=${delRes.status} resolves=${afterResolve.length} exch=${revokedExch.status}`,
   );
 
   // 4. Login with correct credentials succeeds.
