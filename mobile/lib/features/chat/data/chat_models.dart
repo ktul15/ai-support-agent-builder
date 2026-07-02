@@ -49,6 +49,12 @@ class StreamErrorFrame extends ChatStreamEvent {
 
 enum Role { user, assistant }
 
+/// The canonical refusal string. MUST stay in sync with the API's
+/// REFUSAL_MESSAGE (invariant #3) — both gates emit exactly this, so an exact
+/// match is a reliable "I don't know" signal.
+const String kRefusalMessage =
+    "I don't have enough information in the provided sources to answer that.";
+
 /// A completed turn in the transcript.
 class ChatMessage {
   const ChatMessage({
@@ -62,4 +68,8 @@ class ChatMessage {
   final String text;
   final List<Citation> citations;
   final bool? grounded;
+
+  /// True when the assistant emitted the canonical "I don't know" — renders as
+  /// the refusal card (and, being ungrounded, never carries citations).
+  bool get isRefusal => role == Role.assistant && text.trim() == kRefusalMessage;
 }
