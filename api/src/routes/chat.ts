@@ -27,7 +27,9 @@ export interface ChatDeps {
 }
 
 const bodySchema = z.object({
-  assistantId: z.string().uuid(),
+  // Optional: a consumer (assistant-scoped) token pins the assistant, so the
+  // body id is ignored/unnecessary for it. Required for an admin/user token.
+  assistantId: z.string().uuid().optional(),
   question: z.string().trim().min(1).max(4000),
 });
 
@@ -63,7 +65,15 @@ export function chatRouter(deps: ChatDeps, tenantContext: RequestHandler): Route
       res.status(400).json({ error: 'invalid request' });
       return;
     }
-    const { assistantId, question } = parsed.data;
+    const { question } = parsed.data;
+    // A consumer token pins the assistant (from the key); an admin/user token
+    // passes it in the body. The token always wins — a consumer can never query
+    // another assistant by supplying a different body id.
+    const assistantId = tenant.assistantId ?? parsed.data.assistantId;
+    if (!assistantId) {
+      res.status(400).json({ error: 'assistantId is required' });
+      return;
+    }
 
     void (async () => {
       let closed = false;
@@ -124,12 +134,24 @@ export function chatRouter(deps: ChatDeps, tenantContext: RequestHandler): Route
         const assistant = await withTenant(tenant.tenantId, (tx) =>
           tx.assistant.findUnique({
             where: { id: assistantId },
-            select: { id: true, model: true, systemPrompt: true, refusalThreshold: true },
+            select: {
+              id: true,
+              model: true,
+              systemPrompt: true,
+              refusalThreshold: true,
+              status: true,
+            },
           }),
         );
         if (closed) return; // client disconnected during the load
         if (!assistant) {
           res.status(404).json({ error: 'assistant not found' });
+          return;
+        }
+        // Consumers may only talk to a PUBLISHED assistant (status can change
+        // after a key was exchanged; re-check here). Admins can test a draft.
+        if (tenant.assistantId && assistant.status !== 'PUBLISHED') {
+          res.status(403).json({ error: 'assistant is not published' });
           return;
         }
 

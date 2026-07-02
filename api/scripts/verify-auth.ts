@@ -18,6 +18,7 @@ import { randomUUID } from 'node:crypto';
 import { createApp } from '../src/app.js';
 import { disconnectDb, withTenant } from '../src/db.js';
 import { verifyTenantToken } from '../src/auth/tenant-token.js';
+import { hashApiKey } from '../src/auth/api-key.js';
 import { makeTenantContext, requireTenant } from '../src/middleware/tenant-context.js';
 
 config({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../..', '.env') });
@@ -104,6 +105,152 @@ async function main() {
     'token scopes RLS to its own tenant (1 user)',
     meRes.status === 200 && meBody.count === 1,
     `count ${meBody.count}`,
+  );
+
+  // 3b. Signup provisioned exactly one default assistant, and GET /assistants
+  //     (token-scoped) returns it — the admin's upload/publish target.
+  const asstRows = await owner.$queryRaw<{ n: bigint }[]>`
+    SELECT count(*)::bigint AS n FROM assistant WHERE tenant_id = ${tenantId}::uuid`;
+  const asstRes = await fetch(`${base}/assistants`, {
+    headers: { authorization: `Bearer ${signupBody.token}` },
+  });
+  const asstBody = (await asstRes.json()) as {
+    assistants?: { id: string; name: string; status: string }[];
+  };
+  check(
+    'signup provisions a default assistant, listed by GET /assistants',
+    Number(asstRows[0]!.n) === 1 &&
+      asstRes.status === 200 &&
+      asstBody.assistants?.length === 1 &&
+      asstBody.assistants[0]!.name === 'Default assistant' &&
+      typeof asstBody.assistants[0]!.id === 'string',
+    `db=${asstRows[0]!.n} listed=${asstBody.assistants?.length}`,
+  );
+
+  // 3c. The threshold tuner: PATCH /assistants/:id persists the refusal threshold.
+  const asstId = asstBody.assistants![0]!.id;
+  const patchRes = await fetch(`${base}/assistants/${asstId}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${signupBody.token}` },
+    body: JSON.stringify({ refusalThreshold: 0.6 }),
+  });
+  const thrRows = await owner.$queryRaw<{ t: number }[]>`
+    SELECT refusal_threshold::float8 AS t FROM assistant WHERE id = ${asstId}::uuid`;
+  check(
+    'PATCH /assistants updates the refusal threshold',
+    patchRes.status === 200 && thrRows[0]!.t === 0.6,
+    `status=${patchRes.status} threshold=${thrRows[0]?.t}`,
+  );
+
+  const admin = { 'content-type': 'application/json', authorization: `Bearer ${signupBody.token}` };
+
+  // 3d. Publish: PATCH status flips DRAFT -> PUBLISHED.
+  const pubRes = await fetch(`${base}/assistants/${asstId}`, {
+    method: 'PATCH',
+    headers: admin,
+    body: JSON.stringify({ status: 'PUBLISHED' }),
+  });
+  const statusRows = await owner.$queryRaw<{ status: string }[]>`
+    SELECT status FROM assistant WHERE id = ${asstId}::uuid`;
+  check(
+    'publish sets assistant.status = PUBLISHED',
+    pubRes.status === 200 && statusRows[0]!.status === 'PUBLISHED',
+    `status=${pubRes.status} db=${statusRows[0]?.status}`,
+  );
+
+  // 3e. API key: create shows the plaintext ONCE, stores only the sha256 hash,
+  //     and the hash resolves via auth_resolve_api_key.
+  const keyRes = await fetch(`${base}/assistants/${asstId}/api-keys`, {
+    method: 'POST',
+    headers: admin,
+  });
+  const keyBody = (await keyRes.json()) as { id: string; key: string };
+  const storedHash = await owner.$queryRaw<{ key_hash: string }[]>`
+    SELECT key_hash FROM api_key WHERE id = ${keyBody.id}::uuid`;
+  const resolved = await owner.$queryRaw<{ tenant_id: string; assistant_id: string }[]>`
+    SELECT tenant_id, assistant_id FROM auth_resolve_api_key(${hashApiKey(keyBody.key)})`;
+  check(
+    'create key: plaintext shown once, hash stored (not plaintext), resolvable',
+    keyRes.status === 201 &&
+      keyBody.key.startsWith('asab_sk_') &&
+      storedHash[0]?.key_hash === hashApiKey(keyBody.key) &&
+      storedHash[0]?.key_hash !== keyBody.key &&
+      resolved[0]?.tenant_id === tenantId &&
+      resolved[0]?.assistant_id === asstId,
+    `status=${keyRes.status} resolved=${resolved.length}`,
+  );
+
+  // 3f. List returns metadata only (never the secret).
+  const listRes = await fetch(`${base}/assistants/${asstId}/api-keys`, { headers: admin });
+  const listBody = (await listRes.json()) as { api_keys?: { id: string }[] };
+  check(
+    'list returns key metadata without the secret',
+    listBody.api_keys?.length === 1 &&
+      listBody.api_keys[0]!.id === keyBody.id &&
+      !JSON.stringify(listBody).includes(keyBody.key),
+    `keys=${listBody.api_keys?.length}`,
+  );
+
+  // 3h. Consumer exchange: the key trades for an assistant-scoped JWT (the
+  //     assistant is PUBLISHED from 3d), and that JWT is accepted by /chat.
+  const exchange = (apiKey: string): Promise<Response> =>
+    fetch(`${base}/auth/api-key`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ apiKey }),
+    });
+  const exchRes = await exchange(keyBody.key);
+  const exchBody = (await exchRes.json()) as { token?: string };
+  const claims = exchBody.token ? await verifyTenantToken(exchBody.token, SECRET!) : null;
+  check(
+    'api key exchanges for an assistant-scoped consumer token',
+    exchRes.status === 200 &&
+      claims?.tenantId === tenantId &&
+      claims?.assistantId === asstId &&
+      !claims?.userId,
+    `status=${exchRes.status} aid=${claims?.assistantId === asstId}`,
+  );
+  // The consumer token reaches /chat (no assistantId in the body — it's pinned by
+  // the token). Empty corpus -> the gate refuses, but the request is ACCEPTED.
+  const chatRes = await fetch(`${base}/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${exchBody.token}` },
+    body: JSON.stringify({ question: 'hi' }),
+  });
+  check(
+    'consumer token is accepted by /chat (assistant pinned by the token)',
+    chatRes.status === 200 &&
+      (chatRes.headers.get('content-type') ?? '').includes('text/event-stream'),
+    `status=${chatRes.status}`,
+  );
+  await chatRes.body?.cancel();
+
+  // 3i. A bad key and a non-published assistant are refused.
+  const badExch = await exchange('asab_sk_definitely-not-a-real-key');
+  await fetch(`${base}/assistants/${asstId}`, {
+    method: 'PATCH',
+    headers: admin,
+    body: JSON.stringify({ status: 'DRAFT' }),
+  });
+  const draftExch = await exchange(keyBody.key);
+  check(
+    'exchange refuses an unknown key (401) and a non-published assistant (403)',
+    badExch.status === 401 && draftExch.status === 403,
+    `bad=${badExch.status} draft=${draftExch.status}`,
+  );
+
+  // 3g. Revoke: the key row is gone, no longer resolves, and can't be exchanged.
+  const delRes = await fetch(`${base}/assistants/${asstId}/api-keys/${keyBody.id}`, {
+    method: 'DELETE',
+    headers: admin,
+  });
+  const afterResolve = await owner.$queryRaw<{ tenant_id: string }[]>`
+    SELECT tenant_id FROM auth_resolve_api_key(${hashApiKey(keyBody.key)})`;
+  const revokedExch = await exchange(keyBody.key);
+  check(
+    'revoke deletes the key so it no longer resolves or exchanges',
+    delRes.status === 204 && afterResolve.length === 0 && revokedExch.status === 401,
+    `status=${delRes.status} resolves=${afterResolve.length} exch=${revokedExch.status}`,
   );
 
   // 4. Login with correct credentials succeeds.

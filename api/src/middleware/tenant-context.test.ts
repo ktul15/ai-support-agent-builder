@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 import express from 'express';
 import type { Server } from 'node:http';
-import { makeTenantContext } from './tenant-context.js';
+import { makeTenantContext, isAdminSession } from './tenant-context.js';
 import { signTenantToken } from '../auth/tenant-token.js';
 
 const SECRET = 'test-secret-at-least-32-characters-long-xx';
@@ -67,5 +67,14 @@ describe('tenantContext middleware', () => {
     });
     const body = (await res.json()) as { tenant?: { tenantId: string } };
     expect(body.tenant?.tenantId).toBe(TENANT);
+  });
+});
+
+describe('isAdminSession', () => {
+  it('is true only for a human session (userId, no assistant scope)', () => {
+    expect(isAdminSession({ tenantId: TENANT, userId: 'u1' })).toBe(true);
+    expect(isAdminSession({ tenantId: TENANT, assistantId: 'a1' })).toBe(false);
+    expect(isAdminSession({ tenantId: TENANT, userId: 'u1', assistantId: 'a1' })).toBe(false);
+    expect(isAdminSession({ tenantId: TENANT })).toBe(false);
   });
 });

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { AuthError, login, signup } from '../auth/auth-service.js';
+import { AuthError, login, signup, exchangeApiKey } from '../auth/auth-service.js';
 
 // Email is normalized (trim + lowercase) on BOTH signup and login so matching is
 // case-insensitive and the global-uniqueness check is consistent.
@@ -14,6 +14,8 @@ const loginSchema = z.object({
   email: z.string().trim().toLowerCase().email().max(320),
   password: z.string().min(1).max(200),
 });
+
+const apiKeySchema = z.object({ apiKey: z.string().min(1).max(200) });
 
 /**
  * Public auth routes — NOT behind tenantContext (there is no tenant yet). They
@@ -43,6 +45,19 @@ export function authRouter(): Router {
       return;
     }
     login(parsed.data).then(
+      (out) => res.json({ token: out.token }),
+      (err) => sendError(res, err),
+    );
+  });
+
+  // Consumer path: exchange a raw API key for an assistant-scoped JWT (mobile).
+  r.post('/auth/api-key', (req, res) => {
+    const parsed = apiKeySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'invalid request' });
+      return;
+    }
+    exchangeApiKey(parsed.data.apiKey).then(
       (out) => res.json({ token: out.token }),
       (err) => sendError(res, err),
     );

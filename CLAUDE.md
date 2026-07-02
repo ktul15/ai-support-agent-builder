@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-**Planning stage — no application code yet.** The repo currently holds only the design (`PROJECT_PLAN.md`), `README.md`, and `.gitignore`. `PROJECT_PLAN.md` is the **source of truth** for architecture, data model, and the phased build plan; read it before implementing anything. When you scaffold code, update this file with the real build/lint/test commands (none exist yet).
+**Phases 0–2 shipped (merged to `main`).** The backend (`/api` — Express + TS) and `/packages/shared` are implemented and reviewed: multi-tenant Prisma schema with **RLS**, async ingestion (parse → chunk → embed → pgvector) on a **BullMQ** worker, and the full consumer RAG path — tenant-filtered **HNSW** retrieval → threshold gate → numbered prompt assembly → grounded **Claude** generation → **SSE** streaming → mapped citations — plus per-tenant Redis rate limiting and an admin retrieval playground. All six invariants below are enforced in code. **`/admin` (Next.js) and `/mobile` (Flutter) are not yet scaffolded — that is Phase 3.**
+
+`PROJECT_PLAN.md` remains the **source of truth** for architecture, data model, and the phased plan; read it before implementing. See **Backend commands** below for build/lint/test/verify.
 
 ## What this is
 
@@ -12,7 +14,7 @@ A multi-tenant **RAG SaaS**: an SMB uploads docs → async ingestion (parse → 
 
 ## Intended architecture (the big picture)
 
-Planned monorepo: `/api` (Express + TS), `/admin` (Next.js), `/mobile` (Flutter), `/packages/shared`.
+Monorepo (npm workspaces): `/api` (Express + TS) and `/packages/shared` are built; `/admin` (Next.js) and `/mobile` (Flutter) are stubs pending Phase 3.
 
 Request flow that spans multiple components:
 
@@ -38,11 +40,25 @@ Express + TS (zod validation) · Next.js (App Router) · Flutter + BLoC + Dio ·
 
 When adding code generation in `/mobile`, this machine uses **FVM** — prefer `fvm flutter` / `fvm dart`, and run `fvm dart run build_runner build -d` after editing `@freezed`/`@injectable`/`auto_route` files.
 
+## Backend commands (`/api`)
+
+**Node 20 required.** Run from the repo root unless noted.
+
+- **Build / typecheck:** `npm run build` (tsc project refs across workspaces).
+- **Lint / format:** `npm run lint` · `npm run format:check` (write with `npm run format`).
+- **Unit tests:** `npm test` (Vitest; no infra needed — pure/domain logic and route rejections).
+- **Local infra:** `npm run db:up` (Postgres+pgvector, Redis, MinIO via `docker compose`); `db:reset` wipes volumes.
+- **Migrations:** `npm run prisma:deploy -w @asab/api` (applies as the **owner** role via the `migrate.ts` wrapper). Regenerate the client with `npm run prisma:generate -w @asab/api`.
+- **Empirical proofs (`verify:*`, need `db:up`):** every DB/infra-touching subsystem has a live proof script — `npm run verify:<name> -w @asab/api` for `rls, tenant, auth, storage, upload, worker, status, retrieval, chat, ratelimit, playground`. **Prefer adding a `verify:*` proof over mocking** when a feature touches the DB/Redis/HTTP.
+- **Dev server:** `npm run dev:api`.
+
+**Two DB roles:** migrations run as the **owner**; runtime queries run as the restricted **`asab_app`** role inside `withTenant()` (which sets `app.tenant_id` for RLS). Pre-tenant-context / cross-tenant operations (e.g. auth lookups) go through schema-qualified **SECURITY DEFINER** functions, never the restricted role directly.
+
 ## Project management workflow
 
 Work is tracked on **GitHub Projects v2 board #9** (`gh project ... --owner ktul15`), linked to this repo.
 
-- **Phases → milestones**, **subtasks → issues** (51 issues, #2–#52). Phase labels `phase-0`…`phase-5`; area labels `area:backend|rag|mobile|admin|infra|ai-quality`.
+- **Phases → milestones**, **subtasks → issues** (#2 onward; follow-ups like #53/#54 added as discovered). Phase labels `phase-0`…`phase-5`; area labels `area:backend|rag|mobile|admin|infra|ai-quality`.
 - When starting an issue, move its board item to **In Progress**; reference `#<issue>` in commits/PRs so it links.
 - New work items should follow the same pattern: milestone + `phase-N` + `area:*` label + acceptance-criteria checklist, and get added to the board.
 - The board's Kanban view groups by the built-in **Status** field.
