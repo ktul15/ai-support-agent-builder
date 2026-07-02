@@ -9,6 +9,7 @@ import '../bloc/chat_state.dart';
 import '../data/chat_models.dart';
 import 'widgets/citation_chips.dart';
 import 'widgets/message_bubble.dart';
+import 'widgets/refusal_card.dart';
 import 'widgets/typing_indicator.dart';
 
 @RoutePage()
@@ -108,6 +109,10 @@ class _ChatViewState extends State<_ChatView> {
                       final m = state.messages[i];
                       if (m.role == Role.user) {
                         return MessageBubble(text: m.text, isUser: true);
+                      }
+                      // Refusal: a distinct card, never a normal bubble/citations.
+                      if (m.isRefusal) {
+                        return const RefusalCard();
                       }
                       // Assistant turn: the answer, plus tappable source chips
                       // when it cited anything.

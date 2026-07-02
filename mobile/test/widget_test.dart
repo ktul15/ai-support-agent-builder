@@ -9,6 +9,8 @@ import 'package:asab_mobile/app_config.dart';
 import 'package:asab_mobile/core/di/injection.dart';
 import 'package:asab_mobile/features/chat/data/chat_models.dart';
 import 'package:asab_mobile/features/chat/data/chat_repository.dart';
+import 'package:asab_mobile/features/chat/view/widgets/citation_chips.dart';
+import 'package:asab_mobile/features/chat/view/widgets/refusal_card.dart';
 import 'package:asab_mobile/features/chat/view/widgets/typing_indicator.dart';
 
 /// Feeds the bloc from a controllable stream so the UI can be driven step by step.
@@ -29,6 +31,16 @@ Future<void> _bootDi() async {
 }
 
 void main() {
+  // Guards against const drift: the refusal card keys off an exact match, so if
+  // this literal diverges from the API's REFUSAL_MESSAGE every refusal silently
+  // regresses to a plain bubble. Asserted independently of the const itself.
+  test('kRefusalMessage matches the API contract string', () {
+    expect(
+      kRefusalMessage,
+      "I don't have enough information in the provided sources to answer that.",
+    );
+  });
+
   testWidgets('renders the chat screen with an empty-state prompt and input', (tester) async {
     await _bootDi();
     await tester.pumpWidget(const App());
@@ -118,5 +130,28 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Any time.'), findsOneWidget);
     expect(find.text('Source'), findsOneWidget);
+  });
+
+  testWidgets('a refusal renders the refusal card, not a bubble or citations', (tester) async {
+    await _bootDi();
+    final controller = StreamController<ChatStreamEvent>();
+    getIt.unregister<ChatRepository>();
+    getIt.registerFactory<ChatRepository>(() => _StreamRepo(controller.stream));
+
+    await tester.pumpWidget(const App());
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'weather?');
+    await tester.tap(find.byTooltip('Send'));
+    await tester.pump();
+    controller.add(const TokenChunk(kRefusalMessage)); // the API streams this
+    await tester.pump();
+    controller.add(const StreamDone(grounded: false, citations: []));
+    await controller.close();
+    await tester.pumpAndSettle();
+
+    expect(find.byType(RefusalCard), findsOneWidget);
+    expect(find.textContaining("couldn't find that"), findsOneWidget);
+    expect(find.byType(CitationChips), findsNothing); // no fake citations
+    expect(find.text(kRefusalMessage), findsNothing); // raw string not shown
   });
 }
