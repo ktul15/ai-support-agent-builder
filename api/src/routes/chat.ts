@@ -11,6 +11,9 @@ import { evaluateThreshold, REFUSAL_MESSAGE } from '../chat/refusal.js';
 import { buildCitations } from '../chat/citations.js';
 import { rateLimit } from '../middleware/rate-limit.js';
 import type { RateLimiter } from '../ratelimit/index.js';
+import { countTokens } from '../ingestion/chunking/index.js';
+import type { Logger } from '../observability/logger.js';
+import type { UsageMeter } from '../observability/usage-meter.js';
 
 export interface ChatLimits {
   /** Token budget for the assembled sources block (#28; cl100k-approx). */
@@ -24,6 +27,8 @@ export interface ChatDeps {
   generation: GenerationService;
   rateLimiter: RateLimiter;
   limits: ChatLimits;
+  logger: Logger;
+  meter: UsageMeter;
 }
 
 const bodySchema = z.object({
@@ -35,6 +40,8 @@ const bodySchema = z.object({
 
 const HEARTBEAT_MS = 15_000;
 const MAX_STREAM_MS = 120_000;
+// Cap the raw question written to the (PII-bearing) unanswered_question log.
+const MAX_LOGGED_QUESTION = 500;
 
 const sse = (event: string, data: unknown): string =>
   `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -180,18 +187,34 @@ export function chatRouter(deps: ChatDeps, tenantContext: RequestHandler): Route
         // refusal threshold, refuse WITHOUT spending an LLM call.
         const gate = evaluateThreshold(hits, assistant.refusalThreshold);
         if (gate.refuse) {
-          console.info(
-            `chat refusal: assistant=${assistant.id} reason=${gate.reason} ` +
-              `top_score=${gate.topScore ?? 'none'} threshold=${assistant.refusalThreshold}`,
-          );
+          const latencyMs = Math.round(performance.now() - t0);
+          // A question the corpus couldn't answer — the product signal for
+          // filling content gaps / tuning the threshold (#41). NOTE: this stream
+          // carries the raw customer question (truncated) and is therefore
+          // PII-bearing — give it the retention/redaction its content warrants.
+          deps.logger.info('unanswered_question', {
+            tenantId: tenant.tenantId,
+            assistantId: assistant.id,
+            question: question.slice(0, MAX_LOGGED_QUESTION),
+            refusalReason: gate.reason,
+            topScore: gate.topScore,
+            threshold: assistant.refusalThreshold,
+          });
+          deps.logger.info('chat_request', {
+            tenantId: tenant.tenantId,
+            assistantId: assistant.id,
+            latencyMs,
+            topScore: gate.topScore,
+            grounded: false,
+            refused: true,
+            refusalReason: gate.reason,
+            inputTokens: 0,
+            outputTokens: 0,
+            embeddings: 1,
+          });
+          deps.meter.record(tenant.tenantId, { requests: 1, embeddings: 1 });
           safeWrite(sse('token', { text: REFUSAL_MESSAGE }));
-          safeWrite(
-            sse('done', {
-              grounded: false,
-              citations: [],
-              latency_ms: Math.round(performance.now() - t0),
-            }),
-          );
+          safeWrite(sse('done', { grounded: false, citations: [], latency_ms: latencyMs }));
           end();
           return;
         }
@@ -223,6 +246,10 @@ export function chatRouter(deps: ChatDeps, tenantContext: RequestHandler): Route
               if (closed) break;
             }
           } else if (event.type === 'error') {
+            // Retrieval already embedded the query, so meter it even though
+            // generation failed — keeps embedding accounting consistent with the
+            // refusal path (which also bills the one query embedding).
+            deps.meter.record(tenant.tenantId, { requests: 1, embeddings: 1 });
             safeWrite(sse('error', { message: 'generation failed', retryable: event.retryable }));
             end();
             return;
@@ -235,14 +262,48 @@ export function chatRouter(deps: ChatDeps, tenantContext: RequestHandler): Route
           // Only the sources the answer actually cited (#24), not every source
           // shown to the model.
           const citations = refused ? [] : buildCitations(answer, ctx.sources);
+          const grounded = !refused && citations.length > 0;
+          const latencyMs = Math.round(performance.now() - t0);
+          const inputTokens = ctx.totalTokens; // assembled sources sent to the model
+          const outputTokens = countTokens(answer);
+
+          deps.logger.info('chat_request', {
+            tenantId: tenant.tenantId,
+            assistantId: assistant.id,
+            latencyMs,
+            topScore: gate.topScore,
+            grounded,
+            refused,
+            refusalReason: refused ? 'in_prompt' : null,
+            citationCount: citations.length,
+            inputTokens,
+            outputTokens,
+            embeddings: 1,
+          });
+          if (refused) {
+            deps.logger.info('unanswered_question', {
+              tenantId: tenant.tenantId,
+              assistantId: assistant.id,
+              question: question.slice(0, MAX_LOGGED_QUESTION),
+              refusalReason: 'in_prompt',
+              topScore: gate.topScore,
+            });
+          }
+          deps.meter.record(tenant.tenantId, {
+            requests: 1,
+            inputTokens,
+            outputTokens,
+            embeddings: 1,
+          });
+
           safeWrite(
             sse('done', {
               // Grounded = a real answer anchored to >=1 cited source. An answer
               // that refused, or that cited nothing (incl. an empty answer), is
               // not something the corpus verifiably backs.
-              grounded: !refused && citations.length > 0,
+              grounded,
               citations,
-              latency_ms: Math.round(performance.now() - t0),
+              latency_ms: latencyMs,
             }),
           );
           end();
@@ -252,7 +313,10 @@ export function chatRouter(deps: ChatDeps, tenantContext: RequestHandler): Route
         // Log the real cause server-side (e.g. an embedding-model mismatch, #53)
         // so an operator can diagnose it — the client only ever sees a generic
         // failure, never internals.
-        console.error(`chat error: ${err instanceof Error ? err.message : String(err)}`);
+        deps.logger.error('chat_error', {
+          tenantId: tenant.tenantId,
+          message: err instanceof Error ? err.message : String(err),
+        });
         // Pre-headers (DB/setup) error -> plain HTTP 503; post-headers -> SSE
         // error frame.
         if (res.headersSent) safeWrite(sse('error', { message: 'internal error' }));

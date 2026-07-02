@@ -12,6 +12,9 @@ import { createProviders } from './providers/index.js';
 import { createRetrievalService, type RetrievalService } from './retrieval/retrieval-service.js';
 import { createGenerationService, type GenerationService } from './chat/generation-service.js';
 import { createRateLimiter, type RedisTokenBucket } from './ratelimit/index.js';
+import { usageRouter } from './routes/usage.js';
+import { createLogger, type Logger } from './observability/logger.js';
+import { UsageMeter } from './observability/usage-meter.js';
 import type { ChatLimits } from './routes/chat.js';
 import type { ObjectStorage } from './storage/index.js';
 import type { IngestQueue } from './queue/index.js';
@@ -25,6 +28,8 @@ export interface AppDeps {
   generation: GenerationService;
   rateLimiter: RedisTokenBucket;
   limits: ChatLimits;
+  logger: Logger;
+  meter: UsageMeter;
 }
 
 /** Build real deps from config. The entrypoint owns these so it can close them. */
@@ -42,6 +47,8 @@ export function buildDeps(): AppDeps {
       contextTokenBudget: config.CHAT_CONTEXT_TOKEN_BUDGET,
       maxOutputTokens: config.CHAT_MAX_OUTPUT_TOKENS,
     },
+    logger: createLogger(),
+    meter: new UsageMeter(),
   };
 }
 
@@ -73,6 +80,8 @@ export function createApp(deps: AppDeps = buildDeps()): Express {
   app.use(playgroundRouter(deps, tenantContext));
   // Protected: list the tenant's assistants (upload/publish targets).
   app.use(assistantsRouter(tenantContext));
+  // Admin-only: the tenant's own usage totals (tokens / embeddings / requests).
+  app.use(usageRouter(deps.meter, tenantContext));
 
   return app;
 }
