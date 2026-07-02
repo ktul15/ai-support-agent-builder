@@ -58,6 +58,17 @@ export function requireTenant(req: Request): TenantClaims {
   return req.tenant;
 }
 
+/**
+ * An admin (human) session vs a consumer/assistant-scoped one. A user login
+ * carries `userId` and no assistant scope; a consumer/API-key token carries
+ * `assistantId`. Requiring BOTH conditions means a future issuance path that put
+ * a `userId` on a consumer token can't silently gain admin access. Interim admin
+ * signal until real RBAC.
+ */
+export function isAdminSession(claims: TenantClaims): boolean {
+  return Boolean(claims.userId) && !claims.assistantId;
+}
+
 // Lazily bound to the runtime JWT secret on first request (config validates at
 // boot, but we don't want importing this module to force config loading in tests).
 let runtime: RequestHandler | undefined;

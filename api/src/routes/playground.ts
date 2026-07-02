@@ -1,7 +1,7 @@
 import { Router, type RequestHandler } from 'express';
 import { z } from 'zod';
 import { withTenant } from '../db.js';
-import { requireTenant } from '../middleware/tenant-context.js';
+import { requireTenant, isAdminSession } from '../middleware/tenant-context.js';
 import type { RetrievalService } from '../retrieval/retrieval-service.js';
 import { assembleContext, DEFAULT_ASSEMBLE_OPTIONS } from '../chat/prompt-assembly.js';
 import { evaluateThreshold } from '../chat/refusal.js';
@@ -38,10 +38,7 @@ export function playgroundRouter(deps: PlaygroundDeps, tenantContext: RequestHan
 
   r.post('/playground/retrieve', tenantContext, (req, res) => {
     const tenant = requireTenant(req);
-    // Admin gate: require a human session (userId) that is NOT assistant-scoped.
-    // Checking both — not just userId presence — so a future issuance path that
-    // put a userId on a consumer token can't silently widen admin access.
-    if (!tenant.userId || tenant.assistantId) {
+    if (!isAdminSession(tenant)) {
       res.status(403).json({ error: 'admin only' });
       return;
     }

@@ -15,6 +15,11 @@ export default function DashboardPage() {
           Upload documents →
         </Link>
       </p>
+      <p>
+        <Link href="/playground" className="primary-link">
+          Test in the playground →
+        </Link>
+      </p>
     </main>
   );
 }
