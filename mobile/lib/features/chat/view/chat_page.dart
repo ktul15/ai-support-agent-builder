@@ -7,6 +7,7 @@ import '../bloc/chat_bloc.dart';
 import '../bloc/chat_event.dart';
 import '../bloc/chat_state.dart';
 import '../data/chat_models.dart';
+import 'widgets/citation_chips.dart';
 import 'widgets/message_bubble.dart';
 import 'widgets/typing_indicator.dart';
 
@@ -105,9 +106,17 @@ class _ChatViewState extends State<_ChatView> {
                   itemBuilder: (context, i) {
                     if (i < state.messages.length) {
                       final m = state.messages[i];
-                      return MessageBubble(
-                        text: m.text,
-                        isUser: m.role == Role.user,
+                      if (m.role == Role.user) {
+                        return MessageBubble(text: m.text, isUser: true);
+                      }
+                      // Assistant turn: the answer, plus tappable source chips
+                      // when it cited anything.
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          MessageBubble(text: m.text, isUser: false),
+                          if (m.citations.isNotEmpty) CitationChips(citations: m.citations),
+                        ],
                       );
                     }
                     // The in-flight assistant turn: dots until the first token,
