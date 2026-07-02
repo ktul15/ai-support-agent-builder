@@ -1,7 +1,8 @@
-import { prisma } from '../db.js';
+import { prisma, withTenant } from '../db.js';
 import { getConfig } from '../config.js';
 import { hashPassword, verifyPassword } from './password.js';
 import { signTenantToken } from './tenant-token.js';
+import { hashApiKey } from './api-key.js';
 
 /** Expected auth failure (bad credentials, taken email). Maps to a 4xx. */
 export class AuthError extends Error {
@@ -83,4 +84,36 @@ export async function login(input: LoginInput): Promise<AuthResult> {
   const ok = await verifyPassword(user?.password_hash ?? DUMMY_HASH, input.password);
   if (!user || !ok) throw new AuthError('invalid credentials', 401);
   return issue(user.tenant_id, user.user_id);
+}
+
+/**
+ * Consumer auth: exchange a raw API key for a short-lived, assistant-scoped JWT
+ * (the mobile app then sends Bearer, reusing the normal tenantContext path). The
+ * long-lived key travels only here, not on every request. Resolves the key hash
+ * (pre-tenant-context SECURITY DEFINER), then requires the assistant to be
+ * PUBLISHED — a consumer can't talk to a draft.
+ */
+export async function exchangeApiKey(rawKey: string): Promise<{ token: string }> {
+  // Unlike login (which equalizes argon2 work via DUMMY_HASH), this is not
+  // constant-time by design: the "secret" is a 256-bit random key, so a timing
+  // diff could at most reveal whether one specific full key maps to a published
+  // assistant — nothing brute-forceable. Deliberately not equalized.
+  const rows: { tenant_id: string; assistant_id: string }[] = await prisma.$queryRaw`
+    SELECT tenant_id, assistant_id FROM auth_resolve_api_key(${hashApiKey(rawKey)})`;
+  const row = rows[0];
+  if (!row) throw new AuthError('invalid api key', 401);
+
+  const published = await withTenant(row.tenant_id, (tx) =>
+    tx.assistant.findFirst({
+      where: { id: row.assistant_id, status: 'PUBLISHED' },
+      select: { id: true },
+    }),
+  );
+  if (!published) throw new AuthError('assistant is not published', 403);
+
+  const token = await signTenantToken(
+    { tenantId: row.tenant_id, assistantId: row.assistant_id },
+    getConfig().JWT_SECRET,
+  );
+  return { token };
 }
