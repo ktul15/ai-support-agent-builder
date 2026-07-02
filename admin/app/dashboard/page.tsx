@@ -20,6 +20,11 @@ export default function DashboardPage() {
           Test in the playground →
         </Link>
       </p>
+      <p>
+        <Link href="/settings" className="primary-link">
+          Publish &amp; API keys →
+        </Link>
+      </p>
     </main>
   );
 }

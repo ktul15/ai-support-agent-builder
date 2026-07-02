@@ -30,7 +30,8 @@ afterAll(() => {
   server.close();
 });
 
-const adminToken = (): Promise<string> => signTenantToken({ tenantId: TENANT, userId: USER }, SECRET);
+const adminToken = (): Promise<string> =>
+  signTenantToken({ tenantId: TENANT, userId: USER }, SECRET);
 const consumerToken = (): Promise<string> =>
   signTenantToken({ tenantId: TENANT, assistantId: ASSISTANT }, SECRET);
 
@@ -69,9 +70,43 @@ describe('PATCH /assistants/:id (access + validation)', () => {
     expect((await patch('nope', { refusalThreshold: 0.5 }, await adminToken())).status).toBe(400);
   });
   it('400s an out-of-range threshold (admin)', async () => {
-    expect((await patch(ASSISTANT, { refusalThreshold: 1.5 }, await adminToken())).status).toBe(400);
+    expect((await patch(ASSISTANT, { refusalThreshold: 1.5 }, await adminToken())).status).toBe(
+      400,
+    );
     expect((await patch(ASSISTANT, { refusalThreshold: -0.1 }, await adminToken())).status).toBe(
       400,
     );
+  });
+  it('400s an empty body or an invalid status (admin)', async () => {
+    expect((await patch(ASSISTANT, {}, await adminToken())).status).toBe(400);
+    expect((await patch(ASSISTANT, { status: 'LIVE' }, await adminToken())).status).toBe(400);
+  });
+});
+
+describe('API key management (access + validation)', () => {
+  const req = (method: string, path: string, token?: string): Promise<Response> =>
+    fetch(`${base}${path}`, {
+      method,
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+    });
+
+  it('401s without a token', async () => {
+    expect((await req('POST', `/assistants/${ASSISTANT}/api-keys`)).status).toBe(401);
+    expect((await req('GET', `/assistants/${ASSISTANT}/api-keys`)).status).toBe(401);
+    expect((await req('DELETE', `/assistants/${ASSISTANT}/api-keys/${ASSISTANT}`)).status).toBe(
+      401,
+    );
+  });
+
+  it('403s a consumer token', async () => {
+    const t = await consumerToken();
+    expect((await req('POST', `/assistants/${ASSISTANT}/api-keys`, t)).status).toBe(403);
+    expect((await req('GET', `/assistants/${ASSISTANT}/api-keys`, t)).status).toBe(403);
+  });
+
+  it('400s a non-uuid id (admin)', async () => {
+    const t = await adminToken();
+    expect((await req('POST', `/assistants/nope/api-keys`, t)).status).toBe(400);
+    expect((await req('DELETE', `/assistants/${ASSISTANT}/api-keys/nope`, t)).status).toBe(400);
   });
 });

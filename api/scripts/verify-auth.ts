@@ -18,6 +18,7 @@ import { randomUUID } from 'node:crypto';
 import { createApp } from '../src/app.js';
 import { disconnectDb, withTenant } from '../src/db.js';
 import { verifyTenantToken } from '../src/auth/tenant-token.js';
+import { hashApiKey } from '../src/auth/api-key.js';
 import { makeTenantContext, requireTenant } from '../src/middleware/tenant-context.js';
 
 config({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../..', '.env') });
@@ -139,6 +140,68 @@ async function main() {
     'PATCH /assistants updates the refusal threshold',
     patchRes.status === 200 && thrRows[0]!.t === 0.6,
     `status=${patchRes.status} threshold=${thrRows[0]?.t}`,
+  );
+
+  const admin = { 'content-type': 'application/json', authorization: `Bearer ${signupBody.token}` };
+
+  // 3d. Publish: PATCH status flips DRAFT -> PUBLISHED.
+  const pubRes = await fetch(`${base}/assistants/${asstId}`, {
+    method: 'PATCH',
+    headers: admin,
+    body: JSON.stringify({ status: 'PUBLISHED' }),
+  });
+  const statusRows = await owner.$queryRaw<{ status: string }[]>`
+    SELECT status FROM assistant WHERE id = ${asstId}::uuid`;
+  check(
+    'publish sets assistant.status = PUBLISHED',
+    pubRes.status === 200 && statusRows[0]!.status === 'PUBLISHED',
+    `status=${pubRes.status} db=${statusRows[0]?.status}`,
+  );
+
+  // 3e. API key: create shows the plaintext ONCE, stores only the sha256 hash,
+  //     and the hash resolves via auth_resolve_api_key.
+  const keyRes = await fetch(`${base}/assistants/${asstId}/api-keys`, {
+    method: 'POST',
+    headers: admin,
+  });
+  const keyBody = (await keyRes.json()) as { id: string; key: string };
+  const storedHash = await owner.$queryRaw<{ key_hash: string }[]>`
+    SELECT key_hash FROM api_key WHERE id = ${keyBody.id}::uuid`;
+  const resolved = await owner.$queryRaw<{ tenant_id: string; assistant_id: string }[]>`
+    SELECT tenant_id, assistant_id FROM auth_resolve_api_key(${hashApiKey(keyBody.key)})`;
+  check(
+    'create key: plaintext shown once, hash stored (not plaintext), resolvable',
+    keyRes.status === 201 &&
+      keyBody.key.startsWith('asab_sk_') &&
+      storedHash[0]?.key_hash === hashApiKey(keyBody.key) &&
+      storedHash[0]?.key_hash !== keyBody.key &&
+      resolved[0]?.tenant_id === tenantId &&
+      resolved[0]?.assistant_id === asstId,
+    `status=${keyRes.status} resolved=${resolved.length}`,
+  );
+
+  // 3f. List returns metadata only (never the secret).
+  const listRes = await fetch(`${base}/assistants/${asstId}/api-keys`, { headers: admin });
+  const listBody = (await listRes.json()) as { api_keys?: { id: string }[] };
+  check(
+    'list returns key metadata without the secret',
+    listBody.api_keys?.length === 1 &&
+      listBody.api_keys[0]!.id === keyBody.id &&
+      !JSON.stringify(listBody).includes(keyBody.key),
+    `keys=${listBody.api_keys?.length}`,
+  );
+
+  // 3g. Revoke: the key row is gone and no longer resolves.
+  const delRes = await fetch(`${base}/assistants/${asstId}/api-keys/${keyBody.id}`, {
+    method: 'DELETE',
+    headers: admin,
+  });
+  const afterResolve = await owner.$queryRaw<{ tenant_id: string }[]>`
+    SELECT tenant_id FROM auth_resolve_api_key(${hashApiKey(keyBody.key)})`;
+  check(
+    'revoke deletes the key so it no longer resolves',
+    delRes.status === 204 && afterResolve.length === 0,
+    `status=${delRes.status} stillResolves=${afterResolve.length}`,
   );
 
   // 4. Login with correct credentials succeeds.
