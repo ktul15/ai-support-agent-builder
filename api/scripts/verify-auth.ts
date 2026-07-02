@@ -126,6 +126,21 @@ async function main() {
     `db=${asstRows[0]!.n} listed=${asstBody.assistants?.length}`,
   );
 
+  // 3c. The threshold tuner: PATCH /assistants/:id persists the refusal threshold.
+  const asstId = asstBody.assistants![0]!.id;
+  const patchRes = await fetch(`${base}/assistants/${asstId}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${signupBody.token}` },
+    body: JSON.stringify({ refusalThreshold: 0.6 }),
+  });
+  const thrRows = await owner.$queryRaw<{ t: number }[]>`
+    SELECT refusal_threshold::float8 AS t FROM assistant WHERE id = ${asstId}::uuid`;
+  check(
+    'PATCH /assistants updates the refusal threshold',
+    patchRes.status === 200 && thrRows[0]!.t === 0.6,
+    `status=${patchRes.status} threshold=${thrRows[0]?.t}`,
+  );
+
   // 4. Login with correct credentials succeeds.
   const loginRes = await post('/auth/login', { email: EMAIL, password: PASSWORD });
   check('login with correct credentials returns a token', loginRes.status === 200);
